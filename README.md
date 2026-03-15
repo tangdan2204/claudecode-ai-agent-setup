@@ -231,7 +231,7 @@ IronCensor/
 ### 一键安装
 
 ```bash
-git clone https://github.com/tangdan2204/ironcensor.git
+git clone https://github.com/tangdan2204/claudecode-IronCensor.git
 cd ironcensor
 chmod +x install.sh
 ./install.sh

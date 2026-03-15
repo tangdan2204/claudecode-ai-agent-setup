@@ -194,7 +194,7 @@ Claude: "Compression recovery detected. Running 7-step recovery checklist..."
 ### One-Line Install
 
 ```bash
-git clone https://github.com/tangdan2204/ironcensor.git
+git clone https://github.com/tangdan2204/claudecode-IronCensor.git
 cd ironcensor
 chmod +x install.sh && ./install.sh
 ```
