@@ -1,0 +1,32 @@
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "PROXY_MANAGED",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:15721",
+    "ANTHROPIC_VERSION": "2023-06-01"
+  },
+  "includeCoAuthoredBy": false,
+  "statusLine": {
+    "type": "command",
+    "command": "node /Users/tangdan/.claude/hud/omc-hud.mjs"
+  },
+  "permissions": {
+    "deny": [
+      "Bash(rm -rf /)",
+      "Bash(rm -rf ~)",
+      "Bash(rm -rf $HOME)",
+      "Bash(sudo rm -rf *)",
+      "Bash(mkfs *)",
+      "Bash(dd if=* of=/dev/*)",
+      "Bash(chmod 777 /)",
+      "Bash(chmod 777 ~)",
+      "Bash(:(){ :|:& };:)",
+      "Read(/Users/tangdan/.ssh/*)",
+      "Write(/Users/tangdan/.ssh/*)",
+      "Edit(/Users/tangdan/.ssh/*)",
+      "Write(/Users/tangdan/.claude/hooks/*)",
+      "Edit(/Users/tangdan/.claude/hooks/*)",
+      "Write(/etc/*)",
+      "Edit(/etc/*)"
+    ]
+  }
+}
