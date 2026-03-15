@@ -3,6 +3,7 @@
 # 位置: ~/.claude/hooks/sensitive-filter.sh
 # 触发: PreToolUse (matcher: Write|Edit)
 # 机制: 当写入记忆文件时，检查内容是否含密钥/密码
+# 规则来源: rules/sensitive-patterns.txt (外部化) + 内置兜底
 
 set -euo pipefail
 
@@ -27,36 +28,97 @@ if [ -z "$CONTENT" ]; then
   exit 0
 fi
 
-# 检测敏感信息模式
-SENSITIVE_PATTERNS=(
-  'sk-[a-zA-Z0-9]{20,}'           # OpenAI/Anthropic API keys
-  'ghp_[a-zA-Z0-9]{36}'           # GitHub personal access tokens
-  'gho_[a-zA-Z0-9]{36}'           # GitHub OAuth tokens
-  'ghs_[a-zA-Z0-9]{36}'           # GitHub server-to-server tokens
-  'glpat-[a-zA-Z0-9\-]{20,}'      # GitLab tokens
-  'xox[bpsa]-[a-zA-Z0-9\-]+'      # Slack tokens
-  'AKIA[0-9A-Z]{16}'              # AWS access keys
-  'AIza[0-9A-Za-z_-]{35}'         # Google Cloud API keys
-  'ya29\.[0-9A-Za-z_-]+'          # Google OAuth tokens
-  'npm_[a-zA-Z0-9]{36}'           # npm tokens
-  'pypi-[a-zA-Z0-9]{60,}'         # PyPI tokens
-  'Bearer\s+[a-zA-Z0-9\-._~+/]+=*' # Bearer tokens
-  'password\s*[:=]\s*["\x27][^"\x27]{4,}' # password = "xxx"
-  'secret\s*[:=]\s*["\x27][^"\x27]{4,}'   # secret = "xxx"
-  'api[_-]?key\s*[:=]\s*["\x27][^"\x27]{8,}' # api_key = "xxx"
-  '-----BEGIN.*PRIVATE KEY-----'             # SSH/TLS private keys
-  'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.' # JWT tokens
-  'DefaultEndpointsProtocol='                # Azure connection strings
-  'AccountKey=[a-zA-Z0-9+/=]{40,}'          # Azure storage account keys
-)
+# ============================================================
+# 配置: 加载统一环境变量
+# ============================================================
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+ENV_FILE="$PROJECT_ROOT/configs/env.sh"
+if [ -f "$ENV_FILE" ]; then
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+fi
 
-for pattern in "${SENSITIVE_PATTERNS[@]}"; do
-  if echo "$CONTENT" | grep -qEi "$pattern"; then
-    echo "⛔ 安全阻止: 检测到敏感信息（API Key/Token/密码）即将写入记忆文件" >&2
-    echo "文件: $FILE_PATH" >&2
-    echo "请将敏感信息替换为 [REDACTED] 后重试" >&2
-    exit 2
+PATTERNS_FILE="${RULES_DIR:-$PROJECT_ROOT/rules}/sensitive-patterns.txt"
+STATS_LOG="${HOOK_STATS_LOG:-${HOME}/.claude/logs/hook-stats.jsonl}"
+
+# ============================================================
+# 拦截统计
+# ============================================================
+log_block() {
+  local pattern_hint="$1"
+  local stats_dir
+  stats_dir="$(dirname "$STATS_LOG")"
+  mkdir -p "$stats_dir"
+  local ts
+  ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+  echo "{\"ts\":\"$ts\",\"hook\":\"sensitive-filter\",\"file\":\"$FILE_PATH\",\"pattern\":\"$pattern_hint\",\"tool\":\"$TOOL_NAME\"}" >> "$STATS_LOG" 2>/dev/null || true
+}
+
+# ============================================================
+# 外部规则检测
+# ============================================================
+check_external_patterns() {
+  if [ ! -f "$PATTERNS_FILE" ]; then
+    return 1  # 返回非零让调用方降级到内置规则
   fi
-done
+
+  while IFS= read -r pattern; do
+    # 跳过注释和空行
+    [[ "$pattern" =~ ^#.*$ || -z "$pattern" || "$pattern" =~ ^[[:space:]]*$ ]] && continue
+
+    if echo "$CONTENT" | grep -qEi "$pattern" 2>/dev/null; then
+      echo "⛔ 安全阻止: 检测到敏感信息（API Key/Token/密码）即将写入记忆文件" >&2
+      echo "文件: $FILE_PATH" >&2
+      echo "请将敏感信息替换为 [REDACTED] 后重试" >&2
+      log_block "$pattern"
+      exit 2
+    fi
+  done < "$PATTERNS_FILE"
+}
+
+# ============================================================
+# 内置兜底规则（patterns 文件不存在时的最小保护集）
+# ============================================================
+check_builtin_patterns() {
+  local SENSITIVE_PATTERNS=(
+    'sk-[a-zA-Z0-9]{20,}'
+    'ghp_[a-zA-Z0-9]{36}'
+    'gho_[a-zA-Z0-9]{36}'
+    'ghs_[a-zA-Z0-9]{36}'
+    'glpat-[a-zA-Z0-9\-]{20,}'
+    'xox[bpsa]-[a-zA-Z0-9\-]+'
+    'AKIA[0-9A-Z]{16}'
+    'AIza[0-9A-Za-z_-]{35}'
+    'ya29\.[0-9A-Za-z_-]+'
+    'npm_[a-zA-Z0-9]{36}'
+    'pypi-[a-zA-Z0-9]{60,}'
+    'Bearer\s+[a-zA-Z0-9\-._~+/]+=*'
+    'password\s*[:=]\s*["\x27][^"\x27]{4,}'
+    'secret\s*[:=]\s*["\x27][^"\x27]{4,}'
+    'api[_-]?key\s*[:=]\s*["\x27][^"\x27]{8,}'
+    '-----BEGIN.*PRIVATE KEY-----'
+    'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.'
+    'DefaultEndpointsProtocol='
+    'AccountKey=[a-zA-Z0-9+/=]{40,}'
+  )
+
+  for pattern in "${SENSITIVE_PATTERNS[@]}"; do
+    if echo "$CONTENT" | grep -qEi "$pattern"; then
+      echo "⛔ 安全阻止: 检测到敏感信息（API Key/Token/密码）即将写入记忆文件" >&2
+      echo "文件: $FILE_PATH" >&2
+      echo "请将敏感信息替换为 [REDACTED] 后重试" >&2
+      log_block "$pattern"
+      exit 2
+    fi
+  done
+}
+
+# ============================================================
+# 执行检测: 优先外部规则，降级到内置规则
+# ============================================================
+if ! check_external_patterns; then
+  check_builtin_patterns
+fi
 
 exit 0

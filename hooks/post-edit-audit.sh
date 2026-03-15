@@ -4,6 +4,8 @@
 # 触发: PostToolUse (matcher: Write|Edit)
 # 机制: 以 JSONL 格式记录所有源代码编辑，按 session 分组检测熔断
 # 输出格式: {"ts":"...","tool":"...","file":"...","session":"...","cumulative_edits":N}
+# 配置来源: configs/env.sh (统一阈值)
+# 并发保护: flock 防止多实例同时写入
 
 set -euo pipefail
 
@@ -20,40 +22,71 @@ fi
 
 # 只记录源代码和配置文件的编辑
 if [[ "$FILE" =~ \.(ts|tsx|js|jsx|py|go|rs|java|vue|svelte|json|yaml|yml|toml|sh|md)$ ]]; then
-  LOG_DIR="$HOME/.claude/logs"
+
+  # ============================================================
+  # 加载统一配置
+  # ============================================================
+  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+  ENV_FILE="$PROJECT_ROOT/configs/env.sh"
+  if [ -f "$ENV_FILE" ]; then
+    # shellcheck source=/dev/null
+    source "$ENV_FILE"
+  fi
+
+  # 使用统一配置或默认值
+  LOG_DIR="${LOG_DIR:-$HOME/.claude/logs}"
   mkdir -p "$LOG_DIR"
-  LOG_FILE="$LOG_DIR/edit-audit.log"
+  LOG_FILE="${EDIT_AUDIT_LOG:-$LOG_DIR/edit-audit.log}"
+  WARN_THRESHOLD="${CIRCUIT_BREAKER_WARN:-5}"
+  BLOCK_THRESHOLD="${CIRCUIT_BREAKER_BLOCK:-8}"
+  LOOKBACK="${CIRCUIT_BREAKER_LOOKBACK:-30}"
+  MAX_LINES="${AUDIT_LOG_MAX_LINES:-500}"
+  RETAIN_LINES="${AUDIT_LOG_RETAIN_LINES:-200}"
 
   # ============================================================
-  # 熔断计数: 先统计，再写入（确保当前编辑也被计入）
+  # flock 并发保护: 使用文件锁防止多实例同时写入
   # ============================================================
-  RECENT_EDITS=1
-  if [ -f "$LOG_FILE" ]; then
-    # 统计最近 30 条记录中同一文件的编辑次数
-    RECENT_EDITS=$(( $(tail -30 "$LOG_FILE" | grep -c "\"file\":\"$FILE\"" || true) + 1 ))
-  fi
+  LOCK_FILE="${LOG_FILE}.lock"
 
-  # 追加 JSONL 格式审计日志
-  echo "{\"ts\":\"$TIMESTAMP\",\"tool\":\"$TOOL\",\"file\":\"$FILE\",\"session\":\"$SESSION\",\"cumulative_edits\":$RECENT_EDITS}" >> "$LOG_FILE"
-
-  # ============================================================
-  # 熔断警告输出
-  # ============================================================
-  if [ "$RECENT_EDITS" -ge 8 ]; then
-    echo "🔴 熔断硬阻止: $FILE 已被编辑 ${RECENT_EDITS} 次（近30条记录内），强制暂停" >&2
-    echo "必须: 1)检查是否陷入 fix 循环 2)启动降级协议 Level 3 3)请求用户介入" >&2
-    exit 2
-  elif [ "$RECENT_EDITS" -ge 5 ]; then
-    echo "⚠️ 熔断预警: $FILE 已被编辑 ${RECENT_EDITS} 次（近30条记录内），注意是否在反复修改" >&2
-  fi
-
-  # 日志轮转: 超过 500 行时截断保留最近 200 行
-  if [ -f "$LOG_FILE" ]; then
-    LINE_COUNT=$(wc -l < "$LOG_FILE" | tr -d ' ')
-    if [ "$LINE_COUNT" -gt 500 ]; then
-      tail -200 "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
+  (
+    # 获取排他锁（等待最多 5 秒）
+    if command -v flock &>/dev/null; then
+      flock -w 5 200 2>/dev/null || true
     fi
-  fi
+
+    # ============================================================
+    # 熔断计数: 先统计，再写入（确保当前编辑也被计入）
+    # ============================================================
+    RECENT_EDITS=1
+    if [ -f "$LOG_FILE" ]; then
+      # 统计最近 N 条记录中同一文件的编辑次数
+      RECENT_EDITS=$(( $(tail -"$LOOKBACK" "$LOG_FILE" | grep -c "\"file\":\"$FILE\"" || true) + 1 ))
+    fi
+
+    # 追加 JSONL 格式审计日志
+    echo "{\"ts\":\"$TIMESTAMP\",\"tool\":\"$TOOL\",\"file\":\"$FILE\",\"session\":\"$SESSION\",\"cumulative_edits\":$RECENT_EDITS}" >> "$LOG_FILE"
+
+    # ============================================================
+    # 熔断检测
+    # ============================================================
+    if [ "$RECENT_EDITS" -ge "$BLOCK_THRESHOLD" ]; then
+      echo "🔴 熔断硬阻止: $FILE 已被编辑 ${RECENT_EDITS} 次（近${LOOKBACK}条记录内），强制暂停" >&2
+      echo "必须: 1)检查是否陷入 fix 循环 2)启动降级协议 Level 3 3)请求用户介入" >&2
+      exit 2
+    elif [ "$RECENT_EDITS" -ge "$WARN_THRESHOLD" ]; then
+      echo "⚠️ 熔断预警: $FILE 已被编辑 ${RECENT_EDITS} 次（近${LOOKBACK}条记录内），注意是否在反复修改" >&2
+    fi
+
+    # 日志轮转: 超过最大行数时截断
+    if [ -f "$LOG_FILE" ]; then
+      LINE_COUNT=$(wc -l < "$LOG_FILE" | tr -d ' ')
+      if [ "$LINE_COUNT" -gt "$MAX_LINES" ]; then
+        tail -"$RETAIN_LINES" "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
+      fi
+    fi
+
+  ) 200>"$LOCK_FILE"
 fi
 
 exit 0

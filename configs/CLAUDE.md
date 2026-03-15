@@ -344,20 +344,23 @@ IMPORTANT: 这不是可选步骤。每个任务完成后必须执行。
 > 7 个 Hook 脚本 + settings.json deny 构成八层纵深防御
 
 **拦截型 Hook（exit 2 硬阻止）：**
-- 第一层 settings.json deny: 16条规则，直接拒绝 rm -rf/mkfs/dd/chmod 777/SSH写入/hooks目录写入/系统文件写入
-- 第二层 safety-guard.sh (PreToolUse:Bash): 四层检测 — 元命令包装器 → L4绝对禁止 → L3高风险 → 凭证泄露
-- 第三层 sensitive-filter.sh (PreToolUse:Write|Edit): 15种敏感信息模式检测 (API Key/Token/密码/云凭证)
+- 第一层 settings.json deny: 24条规则，直接拒绝 rm -rf/mkfs/dd/chmod 777/SSH写入/hooks目录写入/系统文件写入/sudo/eval/force push/curl|bash
+- 第二层 safety-guard.sh (PreToolUse:Bash): 五层检测 — 元命令包装器(含Base64/heredoc/xargs绕过) → L4绝对禁止 → L3高风险 → 凭证泄露；规则外部化到 `rules/dangerous-commands.txt`，支持动态扩展
+- 第三层 sensitive-filter.sh (PreToolUse:Write|Edit): 24种敏感信息模式检测 (API Key/Token/密码/云凭证/数据库连接/Docker凭证)；规则外部化到 `rules/sensitive-patterns.txt`
 
 **辅助型 Hook（监控/恢复/审计）：**
 - 第四层 pre-compact-save.sh (PreCompact): 压缩前自动保存 Git 状态+工作目录到 compact-state.md
 - 第五层 post-compact-restore.sh (SessionStart:compact): 压缩后注入恢复上下文+强制读取记忆
-- 第六层 post-edit-audit.sh (PostToolUse:Write|Edit): 编辑审计日志+熔断计数检测
+- 第六层 post-edit-audit.sh (PostToolUse:Write|Edit): 编辑审计日志+熔断计数检测(≥8次硬阻止)+flock并发保护
 - 第七层 verify-before-stop.sh (Stop): 完成前检查未提交文件/TODO/证据清单
 
 **软约束层：**
 - 第八层 CLAUDE.md 行为指令: L1-L4 分级 + 熔断 + 认知循环 + 自动推进
 
 > 设计说明: 第一至三层为拦截型(exit 2)，构成安全核心；第四至七层有意与前三层功能重叠，形成纵深冗余。
+> 统一配置: 所有 hook 通过 `configs/env.sh` 加载路径和阈值，修改一处全局生效。
+> 规则外部化: 安全规则存储在 `rules/` 目录，脚本动态加载，扩展规则无需修改代码（OCP 原则）。
+> 拦截统计: 所有阻止事件记录到 `hook-stats.jsonl`，用于分析威胁分布和规则优化。
 
 ### 一、安全风险分级（自行判断，自行执行）
 - 🟢 L1 自由区（读文件/搜索/测试/构建/lint/git查看/lock文件安装）: 直接执行

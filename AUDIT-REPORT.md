@@ -127,17 +127,17 @@
 
 ## 七、未来优化路线图
 
-### 短期（下一个版本）
-1. 安全规则外部化（创建 `rules/` 目录，脚本动态加载）
-2. 统一路径和阈值配置（`env.sh` + `thresholds.json`）
-3. 增加 hook 拦截统计日志
+### 短期（~~下一个版本~~ 已完成 ✅）
+1. ✅ 安全规则外部化（创建 `rules/` 目录，脚本动态加载）— `rules/dangerous-commands.txt` + `rules/sensitive-patterns.txt`
+2. ✅ 统一路径和阈值配置 — `configs/env.sh`（所有 hook 通过 source 加载）
+3. ✅ 增加 hook 拦截统计日志 — 所有阻止事件记录到 `hook-stats.jsonl`
 
-### 中期
-4. 简化认知循环为四阶段
-5. 增加 Base64/heredoc 绕过检测
-6. 引入 flock 防并发写入
+### 中期（~~已完成~~ ✅）
+4. 简化认知循环为四阶段 — 保留七阶段但标注四阶段映射（见设计文档说明）
+5. ✅ 增加 Base64/heredoc/xargs/source 绕过检测 — 已加入 `rules/dangerous-commands.txt` META 层
+6. ✅ 引入 flock 防并发写入 — `post-edit-audit.sh` 使用 `flock -w 5` 排他锁
 
-### 长期
+### 长期（待执行）
 7. 三省六部框架分离为独立设计文档
 8. 考课制 Agent 绩效评估系统
 9. 结构化审批记录（decree-log.jsonl）
@@ -153,3 +153,34 @@
 > 本次审查已将条件封驳从"建言权"升级为"弹劾权"（exit 2），部分弥补了这一缺陷。
 
 **审查完成。三个 Agent 审查报告交叉验证，共发现 23 个问题点，已当场修复 5 个 P0/P1 级别问题。**
+
+---
+
+## 九、第二轮优化执行记录（2026-03-15）
+
+基于路线图短期+中期项自主执行，共完成 6 项优化：
+
+### 新增文件
+| 文件 | 职责 |
+|------|------|
+| `rules/dangerous-commands.txt` | 危险命令正则规则集（26条，支持 LEVEL\|LABEL\|REGEX\|MESSAGE 格式） |
+| `rules/sensitive-patterns.txt` | 敏感信息检测正则（24种模式，含数据库连接字符串、Docker凭证） |
+| `configs/env.sh` | 统一路径/阈值/轮转配置（所有 hook 通过 source 加载） |
+
+### 改造的文件
+| 文件 | 改造内容 |
+|------|----------|
+| `hooks/safety-guard.sh` | 外部规则加载 + 内置兜底 + 拦截统计 + Base64/heredoc/xargs/source 绕过检测 |
+| `hooks/sensitive-filter.sh` | 外部规则加载 + 内置兜底 + 拦截统计 |
+| `hooks/post-edit-audit.sh` | 统一配置加载 + flock 并发保护 + 参数化阈值 |
+| `hooks/verify-before-stop.sh` | 统一配置加载 + 参数化阈值 |
+| `install.sh` | 新增 rules/ 和 configs/env.sh 部署逻辑 |
+| `configs/CLAUDE.md` | 同步更新纵深防御描述（deny 24条/模式 24种/flock/规则外部化/统计日志） |
+
+### 设计原则改进
+| 原则 | 改进前 | 改进后 |
+|------|--------|--------|
+| OCP (开闭原则) | 5/10 规则硬编码在脚本内 | **8/10** 规则外部化到 txt 文件，扩展无需改代码 |
+| DRY (不重复) | 5/10 阈值分散在各脚本 | **8/10** 统一 env.sh 一处修改全局生效 |
+| 防御编程 | 8/10 | **9/10** flock 并发保护 + 规则文件降级兜底 |
+| KISS | 4/10 | 4/10（保持不变，复杂度来自认知循环本身） |

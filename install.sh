@@ -37,6 +37,8 @@ echo "📁 创建目录结构..."
 mkdir -p "$HOOKS_DIR"
 mkdir -p "$CLAUDE_DIR/logs"
 mkdir -p "$MEMORY_DIR"
+RULES_DEST="$HOOKS_DIR/../rules"
+mkdir -p "$RULES_DEST"
 echo "  ✅ 目录已创建"
 echo ""
 
@@ -83,6 +85,26 @@ for script in "$SCRIPT_DIR/hooks/"*.sh; do
     echo "  ✅ $BASENAME"
   fi
 done
+echo ""
+
+# 部署规则文件和统一配置
+echo "📐 部署规则文件和配置..."
+if [ -d "$SCRIPT_DIR/rules" ]; then
+  for rule_file in "$SCRIPT_DIR/rules/"*.txt; do
+    if [ -f "$rule_file" ]; then
+      BASENAME=$(basename "$rule_file")
+      cp "$rule_file" "$RULES_DEST/$BASENAME"
+      echo "  ✅ rules/$BASENAME"
+    fi
+  done
+fi
+if [ -f "$SCRIPT_DIR/configs/env.sh" ]; then
+  # env.sh 放在 hooks 同级的 configs 目录（与项目结构保持一致）
+  CONFIGS_DEST="$(dirname "$HOOKS_DIR")/configs"
+  mkdir -p "$CONFIGS_DEST"
+  cp "$SCRIPT_DIR/configs/env.sh" "$CONFIGS_DEST/env.sh"
+  echo "  ✅ configs/env.sh"
+fi
 echo ""
 
 # 部署记忆文件（不覆盖已有的）

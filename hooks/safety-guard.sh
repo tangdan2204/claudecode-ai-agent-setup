@@ -3,6 +3,7 @@
 # 位置: ~/.claude/hooks/safety-guard.sh
 # 触发: PreToolUse (matcher: Bash)
 # 机制: exit 2 = 阻止执行, exit 0 = 放行
+# 规则来源: rules/dangerous-commands.txt (外部化) + 内置兜底
 
 set -euo pipefail
 
@@ -16,150 +17,158 @@ if [ -z "$COMMAND" ]; then
 fi
 
 # ============================================================
-# 第零层: 命令包装器/间接执行检测 (元命令层)
+# 配置: 加载统一环境变量（路径/阈值）
 # ============================================================
-
-# eval、bash -c、sh -c 等命令包装器
-if echo "$COMMAND" | grep -qEi '(^|\s|;|&&|\|\|)(eval\s|bash\s+-c|sh\s+-c|zsh\s+-c)'; then
-  echo "⛔ 元命令阻止: 检测到命令包装器(eval/bash -c/sh -c)，需要审查内部命令" >&2
-  echo "命令: $COMMAND" >&2
-  exit 2
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+ENV_FILE="$PROJECT_ROOT/configs/env.sh"
+if [ -f "$ENV_FILE" ]; then
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
 fi
 
-# 通过脚本语言间接执行系统命令
-if echo "$COMMAND" | grep -qEi '(python[23]?\s+-c|ruby\s+-e|perl\s+-e|node\s+-e)\s'; then
-  echo "⛔ 元命令阻止: 检测到通过脚本语言间接执行命令" >&2
-  echo "命令: $COMMAND" >&2
-  exit 2
-fi
-
-# 反引号命令替换 (检测包含反引号的命令)
-if echo "$COMMAND" | grep -qF '`'; then
-  echo "🔴 L3 阻止: 检测到反引号命令替换，请使用明确的命令" >&2
-  exit 2
-fi
+# 默认值（env.sh 未加载时的兜底）
+RULES_FILE="${RULES_DIR:-$PROJECT_ROOT/rules}/dangerous-commands.txt"
+STATS_LOG="${HOOK_STATS_LOG:-${HOME}/.claude/logs/hook-stats.jsonl}"
 
 # ============================================================
-# 第一层: 绝对禁止 (L4) - 无条件阻止
+# 拦截统计: 记录每次阻止事件
 # ============================================================
-
-# 删除家目录或根目录
-if echo "$COMMAND" | grep -qE 'rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|--force\s+)*(\/|~\/|\/Users\/|\$HOME)'; then
-  echo "⛔ L4 阻止: 检测到对家目录或根目录的删除操作" >&2
-  echo "命令: $COMMAND" >&2
-  exit 2
-fi
-
-# rm -rf / 或 rm -rf ~
-if echo "$COMMAND" | grep -qE 'rm\s+(-[a-zA-Z]*r[a-zA-Z]*f|--recursive\s+--force)\s+(/\s*$|~|/Users)'; then
-  echo "⛔ L4 阻止: 检测到递归强制删除根/家目录" >&2
-  exit 2
-fi
-
-# 修改 SSH 密钥
-if echo "$COMMAND" | grep -qE '(rm|mv|cp|cat\s*>|echo\s.*>)\s*.*\.ssh/(id_|authorized_keys|known_hosts|config)'; then
-  echo "⛔ L4 阻止: 检测到修改 SSH 密钥/配置的操作" >&2
-  exit 2
-fi
-
-# 执行远程脚本 (curl|bash, wget|sh 等)
-if echo "$COMMAND" | grep -qE '(curl|wget)\s+.*\|\s*(ba)?sh'; then
-  echo "⛔ L4 阻止: 检测到从远程 URL 下载并执行脚本" >&2
-  exit 2
-fi
-
-# curl 下载后执行 (两步操作)
-if echo "$COMMAND" | grep -qE '(curl|wget)\s+.*-o\s+\S+\s*&&\s*(ba)?sh\s'; then
-  echo "⛔ L4 阻止: 检测到下载文件后执行的两步攻击模式" >&2
-  exit 2
-fi
-
-# find -delete 对根/家目录 (等效 rm -rf 操作)
-if echo "$COMMAND" | grep -qE 'find\s+(\/|~\/|\/Users\/|\$HOME)\s.*-delete'; then
-  echo "⛔ L4 阻止: 检测到 find -delete 对根/家目录的等效删除操作" >&2
-  exit 2
-fi
-
-# Fork bomb
-if echo "$COMMAND" | grep -qE ':\(\)\s*\{.*\|.*&\s*\}\s*;'; then
-  echo "⛔ L4 阻止: 检测到 fork bomb" >&2
-  exit 2
-fi
-
-# chmod 777 对敏感路径
-if echo "$COMMAND" | grep -qE 'chmod\s+(777|a\+rwx)\s+(\/|~|\.ssh|\.claude|\.env)'; then
-  echo "⛔ L4 阻止: 检测到对敏感路径设置 777 权限" >&2
-  exit 2
-fi
+log_block() {
+  local level="$1" label="$2" message="$3"
+  local stats_dir
+  stats_dir="$(dirname "$STATS_LOG")"
+  mkdir -p "$stats_dir"
+  local ts
+  ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+  echo "{\"ts\":\"$ts\",\"hook\":\"safety-guard\",\"level\":\"$level\",\"label\":\"$label\",\"command\":$(echo "$COMMAND" | jq -Rs .),\"message\":\"$message\"}" >> "$STATS_LOG" 2>/dev/null || true
+}
 
 # ============================================================
-# 第二层: 高风险拦截 (L3) - 阻止并告知 Claude 原因
+# 规则引擎: 从外部文件加载规则并逐条匹配
 # ============================================================
+check_external_rules() {
+  if [ ! -f "$RULES_FILE" ]; then
+    return 0  # 规则文件不存在，降级到内置规则
+  fi
 
-# git push --force / git push -f / git push +branch (所有强推变体)
-if echo "$COMMAND" | grep -qE 'git\s+push\s+(-[a-zA-Z]*f|--force|--force-with-lease)'; then
-  echo "🔴 L3 阻止: git push --force 是不可逆操作，需用户确认后手动执行" >&2
-  exit 2
-fi
-if echo "$COMMAND" | grep -qE 'git\s+push\s+\S+\s+\+'; then
-  echo "🔴 L3 阻止: git push +branch 等效于 force push，需用户确认" >&2
-  exit 2
-fi
+  while IFS='|' read -r level label regex message; do
+    # 跳过注释和空行
+    [[ "$level" =~ ^#.*$ || -z "$level" ]] && continue
 
-# 普通 git push (L3 确认区 — 与 CLAUDE.md 分级对齐)
-if echo "$COMMAND" | grep -qE 'git\s+push(\s|$)'; then
-  echo "🔴 L3 阻止: git push 需用户确认后执行（代码推送为不可逆共享操作）" >&2
-  exit 2
-fi
+    # 去除首尾空白
+    level=$(echo "$level" | tr -d '[:space:]')
+    label=$(echo "$label" | tr -d '[:space:]' || true)
 
-# git reset --hard
-if echo "$COMMAND" | grep -qE 'git\s+reset\s+--hard'; then
-  echo "🔴 L3 阻止: git reset --hard 会丢失未提交更改，需用户确认" >&2
-  exit 2
-fi
+    # 反引号规则用 grep -F（固定字符串）
+    if [ "$regex" = '`' ]; then
+      if echo "$COMMAND" | grep -qF '`'; then
+        local icon="⛔"
+        [ "$level" = "L3" ] && icon="🔴"
+        [ "$level" = "META" ] && icon="⛔"
+        echo "$icon $level 阻止 [$label]: $message" >&2
+        echo "命令: $COMMAND" >&2
+        log_block "$level" "$label" "$message"
+        exit 2
+      fi
+      continue
+    fi
 
-# git clean -f
-if echo "$COMMAND" | grep -qE 'git\s+clean\s+(-[a-zA-Z]*f|--force)'; then
-  echo "🔴 L3 阻止: git clean -f 会删除未追踪文件，需用户确认" >&2
-  exit 2
-fi
-
-# sudo 操作 (包括 command sudo, env sudo, 链式命令中的 sudo)
-if echo "$COMMAND" | grep -qE '(^|\s|;|&&|\|\|)(sudo|doas)\s'; then
-  echo "🔴 L3 阻止: sudo/doas 提权操作需用户明确授权" >&2
-  exit 2
-fi
-if echo "$COMMAND" | grep -qE '(command|env)\s+sudo\s'; then
-  echo "🔴 L3 阻止: 检测到通过 command/env 包装的 sudo 提权" >&2
-  exit 2
-fi
-
-# 修改系统配置文件 (增加 printf/python/perl/ruby/awk 等写入工具)
-if echo "$COMMAND" | grep -qE '(cat|echo|printf|tee|sed|awk|perl|python[23]?|ruby|>)\s*.*(/etc/|\.bashrc|\.zshrc|\.bash_profile|\.zprofile)'; then
-  echo "🔴 L3 阻止: 检测到修改系统配置文件，需用户确认" >&2
-  exit 2
-fi
-
-# 杀死所有进程
-if echo "$COMMAND" | grep -qE 'kill(all)?\s+(-9\s+)?(-1|0)\b'; then
-  echo "🔴 L3 阻止: 检测到批量杀进程操作" >&2
-  exit 2
-fi
-
-# mkfs / 格式化磁盘
-if echo "$COMMAND" | grep -qE 'mkfs|fdisk|dd\s+if=.*of=/dev/'; then
-  echo "⛔ L4 阻止: 检测到磁盘格式化/写入操作" >&2
-  exit 2
-fi
+    # 正则匹配
+    if echo "$COMMAND" | grep -qEi "$regex" 2>/dev/null; then
+      local icon="⛔"
+      [ "$level" = "L3" ] && icon="🔴"
+      [ "$level" = "META" ] && icon="⛔"
+      echo "$icon $level 阻止 [$label]: $message" >&2
+      echo "命令: $COMMAND" >&2
+      log_block "$level" "$label" "$message"
+      exit 2
+    fi
+  done < "$RULES_FILE"
+}
 
 # ============================================================
-# 第三层: 敏感信息防护
+# 内置兜底规则（rules 文件不存在时的最小保护集）
 # ============================================================
+check_builtin_rules() {
+  # 元命令包装器
+  if echo "$COMMAND" | grep -qEi '(^|\s|;|&&|\|\|)(eval\s|bash\s+-c|sh\s+-c|zsh\s+-c)'; then
+    echo "⛔ 元命令阻止: 检测到命令包装器(eval/bash -c/sh -c)，需要审查内部命令" >&2
+    log_block "META" "元命令包装器" "命令包装器检测"
+    exit 2
+  fi
 
-# 打印环境变量中可能含密钥的内容到外部
-if echo "$COMMAND" | grep -qE '(echo|printf|cat)\s.*\$(.*KEY|.*SECRET|.*TOKEN|.*PASSWORD|.*CREDENTIAL).*\|\s*(curl|wget|nc)'; then
-  echo "⛔ L4 阻止: 检测到可能泄露凭证到外部服务" >&2
-  exit 2
+  # 脚本语言间接执行
+  if echo "$COMMAND" | grep -qEi '(python[23]?\s+-c|ruby\s+-e|perl\s+-e|node\s+-e)\s'; then
+    echo "⛔ 元命令阻止: 检测到通过脚本语言间接执行命令" >&2
+    log_block "META" "脚本语言间接执行" "间接执行检测"
+    exit 2
+  fi
+
+  # 反引号
+  if echo "$COMMAND" | grep -qF '`'; then
+    echo "🔴 L3 阻止: 检测到反引号命令替换，请使用明确的命令" >&2
+    log_block "META" "反引号" "反引号命令替换"
+    exit 2
+  fi
+
+  # Base64 解码执行
+  if echo "$COMMAND" | grep -qEi 'base64\s+(-d|--decode).*\|\s*(ba)?sh'; then
+    echo "⛔ 元命令阻止: 检测到 Base64 解码后执行" >&2
+    log_block "META" "Base64解码执行" "编码绕过检测"
+    exit 2
+  fi
+
+  # rm -rf / 或家目录
+  if echo "$COMMAND" | grep -qE 'rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|--force\s+)*(\/|~\/|\/Users\/|\$HOME)'; then
+    echo "⛔ L4 阻止: 检测到对家目录或根目录的删除操作" >&2
+    log_block "L4" "删除家/根目录" "危险删除操作"
+    exit 2
+  fi
+
+  # sudo
+  if echo "$COMMAND" | grep -qE '(^|\s|;|&&|\|\|)(sudo|doas)\s'; then
+    echo "🔴 L3 阻止: sudo/doas 提权操作需用户明确授权" >&2
+    log_block "L3" "sudo提权" "提权操作"
+    exit 2
+  fi
+
+  # git push
+  if echo "$COMMAND" | grep -qE 'git\s+push(\s|$)'; then
+    echo "🔴 L3 阻止: git push 需用户确认后执行" >&2
+    log_block "L3" "git push" "代码推送"
+    exit 2
+  fi
+
+  # git reset --hard
+  if echo "$COMMAND" | grep -qE 'git\s+reset\s+--hard'; then
+    echo "🔴 L3 阻止: git reset --hard 会丢失未提交更改，需用户确认" >&2
+    log_block "L3" "git reset hard" "硬重置"
+    exit 2
+  fi
+
+  # curl|bash
+  if echo "$COMMAND" | grep -qE '(curl|wget)\s+.*\|\s*(ba)?sh'; then
+    echo "⛔ L4 阻止: 检测到从远程 URL 下载并执行脚本" >&2
+    log_block "L4" "远程脚本执行" "curl pipe bash"
+    exit 2
+  fi
+
+  # mkfs/dd
+  if echo "$COMMAND" | grep -qE 'mkfs|fdisk|dd\s+if=.*of=/dev/'; then
+    echo "⛔ L4 阻止: 检测到磁盘格式化/写入操作" >&2
+    log_block "L4" "磁盘格式化" "磁盘操作"
+    exit 2
+  fi
+}
+
+# ============================================================
+# 执行规则检查: 优先外部规则，降级到内置规则
+# ============================================================
+if [ -f "$RULES_FILE" ]; then
+  check_external_rules
+else
+  check_builtin_rules
 fi
 
 # ============================================================

@@ -1,0 +1,43 @@
+# 危险命令正则规则集
+# 格式: LEVEL|LABEL|REGEX|MESSAGE
+# LEVEL: L4(绝对禁止) / L3(需确认) / META(元命令)
+# 每行一条规则，# 开头为注释，空行忽略
+# safety-guard.sh 动态加载此文件
+
+# ============================================================
+# 元命令层 - 命令包装器/间接执行检测
+# ============================================================
+META|元命令包装器|(^|\s|;|&&|\|\|)(eval\s|bash\s+-c|sh\s+-c|zsh\s+-c)|检测到命令包装器(eval/bash -c/sh -c)，需要审查内部命令
+META|脚本语言间接执行|(python[23]?\s+-c|ruby\s+-e|perl\s+-e|node\s+-e)\s|检测到通过脚本语言间接执行命令
+META|反引号命令替换|`|检测到反引号命令替换，请使用明确的命令
+META|Base64解码执行|base64\s+(-d|--decode).*\|\s*(ba)?sh|检测到 Base64 解码后执行，可能是编码绕过
+META|heredoc管道执行|cat\s*<<.*\|\s*(ba)?sh|检测到 heredoc 管道执行，可能是绕过检测
+META|source远程脚本|source\s+<\(|检测到 source 进程替换，可能加载远程脚本
+META|xargs间接执行|xargs\s+.*\b(rm|mv|sh|bash|curl|wget)\b|检测到 xargs 间接执行危险命令
+
+# ============================================================
+# L4 绝对禁止 - 无条件阻止
+# ============================================================
+L4|删除家/根目录|rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+\|--force\s+)*(\/\|~\/\|\/Users\/\|\$HOME)|检测到对家目录或根目录的删除操作
+L4|递归强制删除|rm\s+(-[a-zA-Z]*r[a-zA-Z]*f\|--recursive\s+--force)\s+(/\s*$\|~\|/Users)|检测到递归强制删除根/家目录
+L4|修改SSH密钥|(rm\|mv\|cp\|cat\s*>\|echo\s.*>)\s*.*\.ssh/(id_\|authorized_keys\|known_hosts\|config)|检测到修改 SSH 密钥/配置的操作
+L4|远程脚本执行|(curl\|wget)\s+.*\|\s*(ba)?sh|检测到从远程 URL 下载并执行脚本
+L4|两步下载执行|(curl\|wget)\s+.*-o\s+\S+\s*&&\s*(ba)?sh\s|检测到下载文件后执行的两步攻击模式
+L4|find删除根目录|find\s+(\/\|~\/\|\/Users\/\|\$HOME)\s.*-delete|检测到 find -delete 对根/家目录的等效删除操作
+L4|Fork炸弹|:\(\)\s*\{.*\|.*&\s*\}\s*;|检测到 fork bomb
+L4|敏感路径777权限|chmod\s+(777\|a\+rwx)\s+(\/\|~\|\.ssh\|\.claude\|\.env)|检测到对敏感路径设置 777 权限
+L4|凭证泄露外部|(echo\|printf\|cat)\s.*\$(.*KEY\|.*SECRET\|.*TOKEN\|.*PASSWORD\|.*CREDENTIAL).*\|\s*(curl\|wget\|nc)|检测到可能泄露凭证到外部服务
+
+# ============================================================
+# L3 高风险 - 阻止并告知原因
+# ============================================================
+L3|git force push|git\s+push\s+(-[a-zA-Z]*f\|--force\|--force-with-lease)|git push --force 是不可逆操作，需用户确认后手动执行
+L3|git push +branch|git\s+push\s+\S+\s+\+|git push +branch 等效于 force push，需用户确认
+L3|git push|git\s+push(\s\|$)|git push 需用户确认后执行（代码推送为不可逆共享操作）
+L3|git reset hard|git\s+reset\s+--hard|git reset --hard 会丢失未提交更改，需用户确认
+L3|git clean force|git\s+clean\s+(-[a-zA-Z]*f\|--force)|git clean -f 会删除未追踪文件，需用户确认
+L3|sudo提权|(^|\s|;|&&|\|\|)(sudo\|doas)\s|sudo/doas 提权操作需用户明确授权
+L3|包装sudo提权|(command\|env)\s+sudo\s|检测到通过 command/env 包装的 sudo 提权
+L3|修改系统配置|(cat\|echo\|printf\|tee\|sed\|awk\|perl\|python[23]?\|ruby\|>)\s*.*(/etc/\|\.bashrc\|\.zshrc\|\.bash_profile\|\.zprofile)|检测到修改系统配置文件，需用户确认
+L3|批量杀进程|kill(all)?\s+(-9\s+)?(-1\|0)\b|检测到批量杀进程操作
+L3|磁盘格式化|mkfs\|fdisk\|dd\s+if=.*of=/dev/|检测到磁盘格式化/写入操作

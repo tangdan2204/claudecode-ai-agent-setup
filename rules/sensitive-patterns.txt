@@ -1,0 +1,44 @@
+# 敏感信息检测正则规则集
+# 格式: 每行一条正则模式，# 开头为注释，空行忽略
+# sensitive-filter.sh 动态加载此文件
+# 使用 grep -Ei 匹配（忽略大小写 + 扩展正则）
+
+# === API Keys ===
+sk-[a-zA-Z0-9]{20,}
+ghp_[a-zA-Z0-9]{36}
+gho_[a-zA-Z0-9]{36}
+ghs_[a-zA-Z0-9]{36}
+glpat-[a-zA-Z0-9\-]{20,}
+AKIA[0-9A-Z]{16}
+AIza[0-9A-Za-z_-]{35}
+npm_[a-zA-Z0-9]{36}
+pypi-[a-zA-Z0-9]{60,}
+
+# === OAuth/Bearer Tokens ===
+xox[bpsa]-[a-zA-Z0-9\-]+
+ya29\.[0-9A-Za-z_-]+
+Bearer\s+[a-zA-Z0-9\-._~+/]+=*
+
+# === 密码/密钥赋值 ===
+password\s*[:=]\s*["\x27][^"\x27]{4,}
+secret\s*[:=]\s*["\x27][^"\x27]{4,}
+api[_-]?key\s*[:=]\s*["\x27][^"\x27]{8,}
+
+# === 私钥和证书 ===
+-----BEGIN.*PRIVATE KEY-----
+
+# === JWT Tokens ===
+eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.
+
+# === 云服务凭证 ===
+DefaultEndpointsProtocol=
+AccountKey=[a-zA-Z0-9+/=]{40,}
+
+# === 数据库连接字符串 ===
+mongodb(\+srv)?://[^@]+@
+postgres(ql)?://[^@]+@
+mysql://[^@]+@
+redis://:[^@]+@
+
+# === Docker/Registry 凭证 ===
+docker login.*-p\s+\S+

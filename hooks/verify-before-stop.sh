@@ -3,6 +3,7 @@
 # 位置: ~/.claude/hooks/verify-before-stop.sh
 # 触发: Stop
 # 机制: 检查未提交更改、新增 TODO、编辑审计日志中的反复修改模式
+# 配置来源: configs/env.sh (统一阈值)
 
 set -euo pipefail
 
@@ -16,6 +17,21 @@ fi
 
 CWD=$(echo "$INPUT" | jq -r '.cwd // "."' 2>/dev/null)
 cd "$CWD" 2>/dev/null || exit 0
+
+# ============================================================
+# 加载统一配置
+# ============================================================
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+ENV_FILE="$PROJECT_ROOT/configs/env.sh"
+if [ -f "$ENV_FILE" ]; then
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+fi
+
+HOT_THRESHOLD="${HOT_FILE_THRESHOLD:-5}"
+HOT_LOOKBACK="${HOT_FILE_LOOKBACK:-20}"
+PATTERN_TIMEOUT="${PATTERNS_UPDATE_TIMEOUT:-60}"
 
 WARNINGS=""
 
@@ -42,10 +58,10 @@ fi
 # ============================================================
 # 检查 3: 编辑审计日志 — 检测反复修改同文件的模式
 # ============================================================
-LOG_FILE="$HOME/.claude/logs/edit-audit.log"
+LOG_FILE="${EDIT_AUDIT_LOG:-$HOME/.claude/logs/edit-audit.log}"
 if [ -f "$LOG_FILE" ]; then
-  # 检查最近 20 条 JSONL 记录中是否有文件被编辑 >=5 次
-  HOT_FILES=$(tail -20 "$LOG_FILE" | jq -r '.file // empty' 2>/dev/null | grep -v '^$' | sort | uniq -c | sort -rn | awk '$1 >= 5 {print $1 "次: " $2}')
+  # 检查最近 N 条 JSONL 记录中是否有文件被编辑 >= 阈值次
+  HOT_FILES=$(tail -"$HOT_LOOKBACK" "$LOG_FILE" | jq -r '.file // empty' 2>/dev/null | grep -v '^$' | sort | uniq -c | sort -rn | awk -v t="$HOT_THRESHOLD" '$1 >= t {print $1 "次: " $2}')
   if [ -n "$HOT_FILES" ]; then
     WARNINGS="${WARNINGS} ⚠️ 以下文件被反复编辑（可能陷入fix循环）: ${HOT_FILES}。"
   fi
@@ -56,9 +72,8 @@ fi
 # ============================================================
 PATTERNS_FILE="$HOME/.claude/projects/-Users-$(whoami)/memory/recurring-patterns.md"
 if [ -f "$PATTERNS_FILE" ]; then
-  # 检查文件最近 10 分钟内是否被修改过（作为反思执行的弱证据）
-  if [ "$(find "$PATTERNS_FILE" -mmin +60 2>/dev/null)" ]; then
-    WARNINGS="${WARNINGS} 💡 recurring-patterns.md 超过60分钟未更新，请确认是否执行了反思阶段。"
+  if [ "$(find "$PATTERNS_FILE" -mmin +"$PATTERN_TIMEOUT" 2>/dev/null)" ]; then
+    WARNINGS="${WARNINGS} 💡 recurring-patterns.md 超过${PATTERN_TIMEOUT}分钟未更新，请确认是否执行了反思阶段。"
   fi
 fi
 
