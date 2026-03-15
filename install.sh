@@ -158,7 +158,7 @@ else
 fi
 
 # 验证脚本权限
-for script in safety-guard.sh sensitive-filter.sh pre-compact-save.sh post-compact-restore.sh post-edit-audit.sh verify-before-stop.sh macos-notify.sh; do
+for script in safety-guard.sh sensitive-filter.sh pre-compact-save.sh post-compact-restore.sh post-edit-audit.sh verify-before-stop.sh macos-notify.sh session-banner.sh; do
   if [ -x "$HOOKS_DIR/$script" ]; then
     echo "  ✅ $script 有执行权限"
   else

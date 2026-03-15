@@ -10,7 +10,7 @@ MEMORY_DIR="$HOME/.claude/projects/-Users-$(whoami)/memory"
 COMPACT_STATE="$MEMORY_DIR/compact-state.md"
 PATTERNS_FILE="$MEMORY_DIR/recurring-patterns.md"
 
-OUTPUT="🔄 上下文压缩恢复:"
+OUTPUT="[IronCensor] 🔄 上下文压缩恢复:"
 
 # 注入 Git 状态
 if git rev-parse --is-inside-work-tree &>/dev/null; then

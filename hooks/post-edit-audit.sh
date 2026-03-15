@@ -71,11 +71,11 @@ if [[ "$FILE" =~ \.(ts|tsx|js|jsx|py|go|rs|java|vue|svelte|json|yaml|yml|toml|sh
     # 熔断检测
     # ============================================================
     if [ "$RECENT_EDITS" -ge "$BLOCK_THRESHOLD" ]; then
-      echo "🔴 熔断硬阻止: $FILE 已被编辑 ${RECENT_EDITS} 次（近${LOOKBACK}条记录内），强制暂停" >&2
+      echo "[IronCensor] 🔴 熔断硬阻止: $FILE 已被编辑 ${RECENT_EDITS} 次（近${LOOKBACK}条记录内），强制暂停" >&2
       echo "必须: 1)检查是否陷入 fix 循环 2)启动降级协议 Level 3 3)请求用户介入" >&2
       exit 2
     elif [ "$RECENT_EDITS" -ge "$WARN_THRESHOLD" ]; then
-      echo "⚠️ 熔断预警: $FILE 已被编辑 ${RECENT_EDITS} 次（近${LOOKBACK}条记录内），注意是否在反复修改" >&2
+      echo "[IronCensor] ⚠️ 熔断预警: $FILE 已被编辑 ${RECENT_EDITS} 次（近${LOOKBACK}条记录内），注意是否在反复修改" >&2
     fi
 
     # 日志轮转: 超过最大行数时截断

@@ -68,7 +68,7 @@ check_external_patterns() {
     [[ "$pattern" =~ ^#.*$ || -z "$pattern" || "$pattern" =~ ^[[:space:]]*$ ]] && continue
 
     if echo "$CONTENT" | grep -qEi "$pattern" 2>/dev/null; then
-      echo "⛔ 安全阻止: 检测到敏感信息（API Key/Token/密码）即将写入记忆文件" >&2
+      echo "[IronCensor] ⛔ 安全阻止: 检测到敏感信息（API Key/Token/密码）即将写入记忆文件" >&2
       echo "文件: $FILE_PATH" >&2
       echo "请将敏感信息替换为 [REDACTED] 后重试" >&2
       log_block "$pattern"
@@ -105,7 +105,7 @@ check_builtin_patterns() {
 
   for pattern in "${SENSITIVE_PATTERNS[@]}"; do
     if echo "$CONTENT" | grep -qEi "$pattern"; then
-      echo "⛔ 安全阻止: 检测到敏感信息（API Key/Token/密码）即将写入记忆文件" >&2
+      echo "[IronCensor] ⛔ 安全阻止: 检测到敏感信息（API Key/Token/密码）即将写入记忆文件" >&2
       echo "文件: $FILE_PATH" >&2
       echo "请将敏感信息替换为 [REDACTED] 后重试" >&2
       log_block "$pattern"

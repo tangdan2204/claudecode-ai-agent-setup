@@ -78,7 +78,7 @@ if [ -f "$PATTERNS_FILE" ]; then
 fi
 
 if [ -n "$WARNINGS" ]; then
-  echo "完成前检查:${WARNINGS} 请确认这些是预期行为。" >&2
+  echo "[IronCensor] 完成前检查:${WARNINGS} 请确认这些是预期行为。" >&2
 fi
 
 exit 0

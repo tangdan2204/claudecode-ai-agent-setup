@@ -66,7 +66,7 @@ check_external_rules() {
         local icon="⛔"
         [ "$level" = "L3" ] && icon="🔴"
         [ "$level" = "META" ] && icon="⛔"
-        echo "$icon $level 阻止 [$label]: $message" >&2
+        echo "[IronCensor] $icon $level 阻止 [$label]: $message" >&2
         echo "命令: $COMMAND" >&2
         log_block "$level" "$label" "$message"
         exit 2
@@ -79,7 +79,7 @@ check_external_rules() {
       local icon="⛔"
       [ "$level" = "L3" ] && icon="🔴"
       [ "$level" = "META" ] && icon="⛔"
-      echo "$icon $level 阻止 [$label]: $message" >&2
+      echo "[IronCensor] $icon $level 阻止 [$label]: $message" >&2
       echo "命令: $COMMAND" >&2
       log_block "$level" "$label" "$message"
       exit 2
@@ -93,70 +93,70 @@ check_external_rules() {
 check_builtin_rules() {
   # 元命令包装器
   if echo "$COMMAND" | grep -qEi '(^|\s|;|&&|\|\|)(eval\s|bash\s+-c|sh\s+-c|zsh\s+-c)'; then
-    echo "⛔ 元命令阻止: 检测到命令包装器(eval/bash -c/sh -c)，需要审查内部命令" >&2
+    echo "[IronCensor] ⛔ 元命令阻止: 检测到命令包装器(eval/bash -c/sh -c)，需要审查内部命令" >&2
     log_block "META" "元命令包装器" "命令包装器检测"
     exit 2
   fi
 
   # 脚本语言间接执行
   if echo "$COMMAND" | grep -qEi '(python[23]?\s+-c|ruby\s+-e|perl\s+-e|node\s+-e)\s'; then
-    echo "⛔ 元命令阻止: 检测到通过脚本语言间接执行命令" >&2
+    echo "[IronCensor] ⛔ 元命令阻止: 检测到通过脚本语言间接执行命令" >&2
     log_block "META" "脚本语言间接执行" "间接执行检测"
     exit 2
   fi
 
   # 反引号
   if echo "$COMMAND" | grep -qF '`'; then
-    echo "🔴 L3 阻止: 检测到反引号命令替换，请使用明确的命令" >&2
+    echo "[IronCensor] 🔴 L3 阻止: 检测到反引号命令替换，请使用明确的命令" >&2
     log_block "META" "反引号" "反引号命令替换"
     exit 2
   fi
 
   # Base64 解码执行
   if echo "$COMMAND" | grep -qEi 'base64\s+(-d|--decode).*\|\s*(ba)?sh'; then
-    echo "⛔ 元命令阻止: 检测到 Base64 解码后执行" >&2
+    echo "[IronCensor] ⛔ 元命令阻止: 检测到 Base64 解码后执行" >&2
     log_block "META" "Base64解码执行" "编码绕过检测"
     exit 2
   fi
 
   # rm -rf / 或家目录
   if echo "$COMMAND" | grep -qE 'rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|--force\s+)*(\/|~\/|\/Users\/|\$HOME)'; then
-    echo "⛔ L4 阻止: 检测到对家目录或根目录的删除操作" >&2
+    echo "[IronCensor] ⛔ L4 阻止: 检测到对家目录或根目录的删除操作" >&2
     log_block "L4" "删除家/根目录" "危险删除操作"
     exit 2
   fi
 
   # sudo
   if echo "$COMMAND" | grep -qE '(^|\s|;|&&|\|\|)(sudo|doas)\s'; then
-    echo "🔴 L3 阻止: sudo/doas 提权操作需用户明确授权" >&2
+    echo "[IronCensor] 🔴 L3 阻止: sudo/doas 提权操作需用户明确授权" >&2
     log_block "L3" "sudo提权" "提权操作"
     exit 2
   fi
 
   # git push
   if echo "$COMMAND" | grep -qE 'git\s+push(\s|$)'; then
-    echo "🔴 L3 阻止: git push 需用户确认后执行" >&2
+    echo "[IronCensor] 🔴 L3 阻止: git push 需用户确认后执行" >&2
     log_block "L3" "git push" "代码推送"
     exit 2
   fi
 
   # git reset --hard
   if echo "$COMMAND" | grep -qE 'git\s+reset\s+--hard'; then
-    echo "🔴 L3 阻止: git reset --hard 会丢失未提交更改，需用户确认" >&2
+    echo "[IronCensor] 🔴 L3 阻止: git reset --hard 会丢失未提交更改，需用户确认" >&2
     log_block "L3" "git reset hard" "硬重置"
     exit 2
   fi
 
   # curl|bash
   if echo "$COMMAND" | grep -qE '(curl|wget)\s+.*\|\s*(ba)?sh'; then
-    echo "⛔ L4 阻止: 检测到从远程 URL 下载并执行脚本" >&2
+    echo "[IronCensor] ⛔ L4 阻止: 检测到从远程 URL 下载并执行脚本" >&2
     log_block "L4" "远程脚本执行" "curl pipe bash"
     exit 2
   fi
 
   # mkfs/dd
   if echo "$COMMAND" | grep -qE 'mkfs|fdisk|dd\s+if=.*of=/dev/'; then
-    echo "⛔ L4 阻止: 检测到磁盘格式化/写入操作" >&2
+    echo "[IronCensor] ⛔ L4 阻止: 检测到磁盘格式化/写入操作" >&2
     log_block "L4" "磁盘格式化" "磁盘操作"
     exit 2
   fi
