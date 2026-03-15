@@ -101,6 +101,76 @@ Inspired by ancient Chinese governance:
 
 ---
 
+## Real-World Scenarios: Before vs After
+
+### Scenario 1: Fixing an API Bug
+
+**Vanilla Claude Code:**
+```
+User: "Fix the 500 error on /api/users"
+Claude: Opens file → sees error → changes one line → "Done, should be fine"
+Result: No tests run, new bug introduced; same issue exists in /api/orders but nobody noticed
+```
+
+**With this configuration:**
+```
+User: "Fix the 500 error on /api/users"
+Claude:
+  [Perceive] Read recurring-patterns.md → found pattern P003 in API layer
+  [Think] Invoke explore agent to locate all related files + debugger for root cause
+  [Plan] "3 files involved, medium path" → present plan to user
+  [Execute] executor fixes code + tests run after each change → quality-reviewer audits
+  [Verify] ✅ npm test passed ✅ tsc clean ✅ reviewer approved
+  [Reflect] Grep entire project → found same issue in /api/orders → fixed both
+  [Evolve] Written to recurring-patterns.md + knowledge graph; auto-warns next time
+```
+
+### Scenario 2: Refactoring the Auth Module
+
+**Vanilla Claude Code:**
+```
+User: "Refactor the auth module"
+Claude: Starts massive changes → 15 files modified → build fails → fix loops → worse
+     → User discovers SSH key accidentally exposed in logs → security incident
+```
+
+**With this configuration:**
+```
+User: "Refactor the auth module"
+Claude:
+  [Plan] >10 files → complex path → ralplan consensus planning
+         → planner + architect + critic three-way review
+         → dry-run validation: executor simulates + debugger predicts risks
+  [Execute] Parallel dispatch: executor(core) ∥ test-engineer(tests) ∥ security-reviewer
+         → progress report every 3 steps → step 5: potential key leak detected
+         → sensitive-filter.sh hard block (exit 2) → write prevented
+         → security-reviewer recommends key sanitization layer
+  [Verify] Full test suite + build + ReACT deep review (5 rounds of reason-act)
+  [Reflect] Agent interviews → executor/debugger/test-engineer each provide feedback
+         → test coverage gap discovered → boundary tests added
+```
+
+### Scenario 3: Context Window Compression
+
+**Vanilla Claude Code:**
+```
+[Compression happens] → all prior work forgotten
+User: "Continue the previous task"
+Claude: "Sorry, I don't remember what we were doing. Please explain again."
+```
+
+**With this configuration:**
+```
+[Before compression] pre-compact-save.sh auto-saves Git state + task progress
+[After compression] post-compact-restore.sh injects recovery context
+Claude: "Compression recovery detected. Running 7-step recovery checklist..."
+  → Read notepad → Read project_memory → Read MEMORY.md
+  → Restore Git branch state → Confirm task progress
+  → "Context restored. Last completed step 3 of 5. Continuing with step 4..."
+```
+
+---
+
 ## Quick Start
 
 ### Prerequisites

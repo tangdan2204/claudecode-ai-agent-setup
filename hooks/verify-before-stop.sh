@@ -44,8 +44,8 @@ fi
 # ============================================================
 LOG_FILE="$HOME/.claude/logs/edit-audit.log"
 if [ -f "$LOG_FILE" ]; then
-  # 检查最近 20 条记录中是否有文件被编辑 >=5 次
-  HOT_FILES=$(tail -20 "$LOG_FILE" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/, "", $3); print $3}' | sort | uniq -c | sort -rn | awk '$1 >= 5 {print $1 "次: " $2}')
+  # 检查最近 20 条 JSONL 记录中是否有文件被编辑 >=5 次
+  HOT_FILES=$(tail -20 "$LOG_FILE" | jq -r '.file // empty' 2>/dev/null | grep -v '^$' | sort | uniq -c | sort -rn | awk '$1 >= 5 {print $1 "次: " $2}')
   if [ -n "$HOT_FILES" ]; then
     WARNINGS="${WARNINGS} ⚠️ 以下文件被反复编辑（可能陷入fix循环）: ${HOT_FILES}。"
   fi

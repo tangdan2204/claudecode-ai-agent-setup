@@ -44,6 +44,10 @@ SENSITIVE_PATTERNS=(
   'password\s*[:=]\s*["\x27][^"\x27]{4,}' # password = "xxx"
   'secret\s*[:=]\s*["\x27][^"\x27]{4,}'   # secret = "xxx"
   'api[_-]?key\s*[:=]\s*["\x27][^"\x27]{8,}' # api_key = "xxx"
+  '-----BEGIN.*PRIVATE KEY-----'             # SSH/TLS private keys
+  'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.' # JWT tokens
+  'DefaultEndpointsProtocol='                # Azure connection strings
+  'AccountKey=[a-zA-Z0-9+/=]{40,}'          # Azure storage account keys
 )
 
 for pattern in "${SENSITIVE_PATTERNS[@]}"; do

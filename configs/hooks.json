@@ -9,7 +9,7 @@
           },
           {
             "type": "command",
-            "command": "/Users/tangdan/.claude/hooks/hud-plus-guard.sh"
+            "command": "test -f /Users/tangdan/.claude/hooks/hud-plus-guard.sh && /Users/tangdan/.claude/hooks/hud-plus-guard.sh || true"
           }
         ]
       },

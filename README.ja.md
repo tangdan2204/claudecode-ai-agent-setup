@@ -93,6 +93,55 @@
 
 ---
 
+## リアルシナリオ比較: Before vs After
+
+### シナリオ1: APIバグの修正
+
+**通常の Claude Code:**
+```
+ユーザー: "/api/users の500エラーを修正して"
+Claude: ファイルを開く → エラーを見つける → 1行変更 → "完了、問題ないはずです"
+結果: テスト未実行、新しいバグを導入; /api/orders に同じ問題があるが誰も気づかない
+```
+
+**本設定を導入した Claude Code:**
+```
+ユーザー: "/api/users の500エラーを修正して"
+Claude:
+  [知覚] recurring-patterns.md を読む → API層でP003パターンを発見
+  [思考] explore agent で関連ファイルを特定 + debugger で根本原因分析
+  [計画] "3ファイル関連、中等パス" → ユーザーに計画を提示
+  [実行] executor が修正 + 変更ごとにテスト実行 → quality-reviewer が監査
+  [検証] ✅ npm test 通過 ✅ tsc エラーなし ✅ reviewer 承認
+  [反省] プロジェクト全体をGrep → /api/orders に同じ問題発見 → 両方修正
+  [進化] recurring-patterns.md + ナレッジグラフに記録、次回自動警告
+```
+
+### シナリオ2: 認証モジュールのリファクタリング
+
+**通常の Claude Code:**
+```
+ユーザー: "認証モジュールをリファクタリングして"
+Claude: 大規模変更を開始 → 15ファイル変更 → ビルド失敗 → 修復ループ → 悪化
+     → SSH鍵がログに誤って公開されていることを発見 → セキュリティ事故
+```
+
+**本設定を導入した Claude Code:**
+```
+ユーザー: "認証モジュールをリファクタリングして"
+Claude:
+  [計画] >10ファイル → 複雑パス → ralplan コンセンサス計画
+         → planner + architect + critic の三者審査
+         → ドライラン検証: executor シミュレーション + debugger リスク予測
+  [実行] 並列ディスパッチ: executor(コア) ∥ test-engineer(テスト) ∥ security-reviewer
+         → 3ステップごとに進捗報告 → ステップ5: 鍵漏洩リスク検出
+         → sensitive-filter.sh ハードブロック (exit 2) → 書き込み防止
+  [検証] フルテスト + ビルド + ReACT 深度審査（5ラウンド）
+  [反省] Agent インタビュー → テストカバレッジの盲点を発見 → 境界テスト追加
+```
+
+---
+
 ## クイックスタート
 
 ```bash

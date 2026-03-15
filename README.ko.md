@@ -93,6 +93,55 @@
 
 ---
 
+## 실제 시나리오 비교: Before vs After
+
+### 시나리오 1: API 버그 수정
+
+**일반 Claude Code:**
+```
+사용자: "/api/users의 500 에러를 수정해줘"
+Claude: 파일 열기 → 에러 발견 → 한 줄 수정 → "완료, 문제없을 거예요"
+결과: 테스트 미실행, 새 버그 도입; /api/orders에도 같은 문제가 있지만 아무도 발견하지 못함
+```
+
+**이 설정을 적용한 Claude Code:**
+```
+사용자: "/api/users의 500 에러를 수정해줘"
+Claude:
+  [인식] recurring-patterns.md 읽기 → API 레이어에서 P003 패턴 발견
+  [사고] explore agent로 관련 파일 탐색 + debugger로 근본 원인 분석
+  [계획] "3개 파일 관련, 중간 경로" → 사용자에게 계획 제시
+  [실행] executor 수정 + 변경마다 테스트 → quality-reviewer 감사
+  [검증] ✅ npm test 통과 ✅ tsc 클린 ✅ reviewer 승인
+  [반성] 프로젝트 전체 Grep → /api/orders에서 동일 문제 발견 → 함께 수정
+  [진화] recurring-patterns.md + 지식 그래프에 기록, 다음에 자동 경고
+```
+
+### 시나리오 2: 인증 모듈 리팩토링
+
+**일반 Claude Code:**
+```
+사용자: "인증 모듈을 리팩토링해줘"
+Claude: 대규모 변경 시작 → 15개 파일 변경 → 빌드 실패 → 반복 수정 → 악화
+     → SSH 키가 로그에 실수로 노출됨 → 보안 사고
+```
+
+**이 설정을 적용한 Claude Code:**
+```
+사용자: "인증 모듈을 리팩토링해줘"
+Claude:
+  [계획] >10 파일 → 복잡 경로 → ralplan 합의 계획
+         → planner + architect + critic 삼자 검토
+         → 드라이런 검증: executor 시뮬레이션 + debugger 리스크 예측
+  [실행] 병렬 디스패치: executor(핵심) ∥ test-engineer(테스트) ∥ security-reviewer
+         → 3단계마다 진행 보고 → 5단계: 키 유출 위험 감지
+         → sensitive-filter.sh 하드 블록 (exit 2) → 쓰기 방지
+  [검증] 전체 테스트 + 빌드 + ReACT 심층 검토 (5라운드)
+  [반성] Agent 인터뷰 → 테스트 커버리지 사각지대 발견 → 경계 테스트 추가
+```
+
+---
+
 ## 빠른 시작
 
 ```bash

@@ -264,6 +264,75 @@ ls -la ~/.claude/hooks/*.sh
 
 ---
 
+## 真实场景对比：Before vs After
+
+### 场景一：修复一个 API 接口 bug
+
+**普通 Claude Code：**
+```
+用户: "修复 /api/users 接口的 500 错误"
+Claude: 直接打开文件 → 看到报错 → 改一行代码 → "好了，应该没问题了"
+结果: 没跑测试，引入了新 bug；同类问题在 /api/orders 中也存在，但没人发现
+```
+
+**装了本配置的 Claude Code：**
+```
+用户: "修复 /api/users 接口的 500 错误"
+Claude:
+  [感知] 读取 recurring-patterns.md → 发现 API 层过去出现过 P003 模式
+  [思考] 调用 explore agent 定位所有相关文件 + debugger 分析根因
+  [规划] "涉及 3 个文件，走中等路径" → 向用户展示计划
+  [执行] executor 修复 + 边改边跑测试 → quality-reviewer 审查
+  [验证] ✅ npm test 通过 ✅ tsc 无报错 ✅ reviewer 无阻塞意见
+  [反思] Grep 全项目扫描 → 发现 /api/orders 有同类问题 → 一并修复
+  [进化] 写入 recurring-patterns.md + 知识图谱，下次自动预警
+```
+
+### 场景二：重构认证模块
+
+**普通 Claude Code：**
+```
+用户: "重构认证模块"
+Claude: 直接开始大改 → 改了 15 个文件 → 构建失败 → 反复修补 → 越改越乱
+     → 用户发现 SSH 密钥被意外暴露在日志中 → 安全事故
+```
+
+**装了本配置的 Claude Code：**
+```
+用户: "重构认证模块"
+Claude:
+  [规划] >10 文件 → 复杂路径 → ralplan 共识规划
+         → planner + architect + critic 三方审核计划
+         → 预演验证: executor 干跑 + debugger 预判风险
+  [执行] 并行调度: executor(核心逻辑) ∥ test-engineer(测试) ∥ security-reviewer(安全)
+         → 每 3 步汇报进度 → 第 5 步发现潜在密钥泄露
+         → sensitive-filter.sh 硬拦截 (exit 2) → 阻止写入
+         → security-reviewer 建议增加密钥脱敏层
+  [验证] 全量测试 + 构建 + ReACT 深度审查（5 轮自主检查）
+  [反思] Agent 采访 → executor/debugger/test-engineer 各自反馈
+         → 发现测试覆盖盲区 → 补充边界测试
+```
+
+### 场景三：上下文窗口被压缩
+
+**普通 Claude Code：**
+```
+[压缩发生] → 之前的工作全部遗忘 → 用户: "继续刚才的任务"
+Claude: "抱歉，我不记得之前在做什么了，请重新说明"
+```
+
+**装了本配置的 Claude Code：**
+```
+[压缩前] pre-compact-save.sh 自动保存 Git 状态 + 任务进度到 compact-state.md
+[压缩后] post-compact-restore.sh 注入恢复上下文
+Claude: "检测到压缩恢复，执行 7 步恢复检查列表..."
+  → 读取 notepad → 读取 project_memory → 读取 MEMORY.md
+  → 恢复 Git 分支状态 → 确认任务进度
+  → "已恢复上下文。上次完成到第 3 步（共 5 步），继续执行第 4 步..."
+```
+
+---
+
 ## 效果对比
 
 | 指标 | 改善前 | 改善后 |
@@ -276,6 +345,10 @@ ls -la ~/.claude/hooks/*.sh
 | 错误自我修正 | 被动等待纠正 | 主动检测 + 升级 + 自动化 |
 | 治理结构 | 无 | 三省六部制衡 + 封驳机制 |
 | 编辑异常检测 | 无 | 熔断计数（5 次预警/8 次警告） |
+| Agent 调用失败 | 直接放弃 | 三级容错降级（正常→重试→规则兜底） |
+| 代码审查深度 | 固定清单 | ReACT 自主审查（最多 5 轮推理-行动循环） |
+| 并行执行效率 | 串行逐步 | 并行维度调度（executor ∥ test ∥ writer ∥ security） |
+| 任务经验积累 | 每次从零 | 知识图谱自动回写（实体+关系+语义搜索） |
 
 ---
 
