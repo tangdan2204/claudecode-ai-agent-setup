@@ -41,16 +41,18 @@
 ├──────────────────────────────────────────────────────────────┤
 │                                                              │
 │  ┌─ 硬安全层 (Hooks + settings.json) ───────────────────┐   │
-│  │  Layer 0: settings.json deny (16条绝对禁止规则)        │   │
-│  │  Layer 1: safety-guard.sh  (元命令+危险操作拦截)       │   │
-│  │  Layer 2: sensitive-filter.sh (15种敏感信息检测)       │   │
+│  │  Layer 0: settings.json deny (24条绝对禁止规则)        │   │
+│  │  Layer 1: safety-guard.sh  (元命令+危险操作+绕过检测)  │   │
+│  │  Layer 2: sensitive-filter.sh (24种敏感信息检测)       │   │
 │  │  [exit 2 硬阻止 — AI 无法绕过]                         │   │
+│  │  规则外部化: rules/dangerous-commands.txt              │   │
+│  │              rules/sensitive-patterns.txt              │   │
 │  └────────────────────────────────────────────────────────┘  │
 │                                                              │
 │  ┌─ 辅助监控层 (Hooks) ──────────────────────────────────┐  │
 │  │  Layer 3: pre-compact-save.sh    (压缩前状态保存)      │  │
 │  │  Layer 4: post-compact-restore.sh (压缩后上下文恢复)   │  │
-│  │  Layer 5: post-edit-audit.sh     (编辑审计+熔断检测)   │  │
+│  │  Layer 5: post-edit-audit.sh     (编辑审计+熔断+flock) │  │
 │  │  Layer 6: verify-before-stop.sh  (完成前四项检查)      │  │
 │  └────────────────────────────────────────────────────────┘  │
 │                                                              │
@@ -65,6 +67,11 @@
 │  ┌─ 记忆持久层 ──────────────────────────────────────────┐  │
 │  │  MEMORY.md (核心索引) + recurring-patterns.md (模式库) │  │
 │  │  compact-state.md (压缩快照) + edit-audit.log (审计)   │  │
+│  │  hook-stats.jsonl (拦截统计)                           │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                                                              │
+│  ┌─ 配置中枢层 ────────────────────────────────────────┐   │
+│  │  configs/env.sh (统一路径/阈值，一处修改全局生效)       │   │
 │  └────────────────────────────────────────────────────────┘  │
 │                                                              │
 │  ┌─ 多代理编排层 (OMC 可选) ─────────────────────────────┐  │
@@ -98,12 +105,12 @@
 
 | 层级 | 组件 | 类型 | 功能 |
 |------|------|------|------|
-| Layer 0 | settings.json deny | 硬拦截 | 16 条规则：rm -rf、mkfs、dd、chmod 777、SSH 密钥、hooks 目录保护、系统文件保护 |
-| Layer 1 | safety-guard.sh | 硬拦截 | 四层检测：元命令包装器 → L4 绝对禁止 → L3 高风险 → 凭证泄露 |
-| Layer 2 | sensitive-filter.sh | 硬拦截 | 15 种敏感信息模式：OpenAI/GitHub/AWS/GCP/Slack/npm/PyPI 令牌 |
+| Layer 0 | settings.json deny | 硬拦截 | 24 条规则：rm -rf、mkfs、dd、chmod 777、SSH 密钥、hooks 目录保护、sudo、eval、force push、curl\|bash |
+| Layer 1 | safety-guard.sh | 硬拦截 | 五层检测：元命令包装器 → Base64/heredoc/xargs 绕过 → L4 绝对禁止 → L3 高风险 → 凭证泄露；规则外部化到 `rules/dangerous-commands.txt` |
+| Layer 2 | sensitive-filter.sh | 硬拦截 | 24 种敏感信息模式：API Key/Token/密码/私钥/JWT/云凭证/数据库连接；规则外部化到 `rules/sensitive-patterns.txt` |
 | Layer 3 | pre-compact-save.sh | 辅助 | 压缩前自动保存 Git 状态 + 工作目录快照 |
 | Layer 4 | post-compact-restore.sh | 辅助 | 压缩后注入上下文 + 强制 7 步恢复检查列表 |
-| Layer 5 | post-edit-audit.sh | 辅助 | 编辑审计日志 + 熔断计数检测（5 次预警/8 次警告） |
+| Layer 5 | post-edit-audit.sh | 辅助 | 编辑审计日志 + 熔断计数检测（5 次预警/8 次硬阻止）+ flock 并发保护 |
 | Layer 6 | verify-before-stop.sh | 辅助 | 完成前 4 项检查：未提交/TODO/反复编辑/反思证据 |
 | Layer 7 | CLAUDE.md | 软约束 | L1-L4 安全分级 + 认知循环 + 三省六部治理 |
 
@@ -180,6 +187,7 @@ ClaudeCode-AI-Agent-Setup/
 ├── README.en.md                        # English README
 ├── README.ja.md                        # 日本語 README
 ├── README.ko.md                        # 한국어 README
+├── AUDIT-REPORT.md                     # 三维架构审查报告
 ├── PRD.md                              # 产品需求文档
 ├── RESEARCH-REPORT.md                  # 六维科学研究报告
 ├── QUICK-START.md                      # 快速搭建指南
@@ -187,15 +195,19 @@ ClaudeCode-AI-Agent-Setup/
 ├── install.sh                          # 自动安装脚本
 ├── LICENSE                             # MIT 许可证
 ├── configs/
-│   ├── settings.json                   # 权限配置 + 16 条 deny 规则
+│   ├── settings.json                   # 权限配置 + 24 条 deny 规则
 │   ├── hooks.json                      # Hook 路由表（7 个生命周期事件）
-│   └── CLAUDE.md                       # 核心行为指令（智能操作系统 v1）
+│   ├── CLAUDE.md                       # 核心行为指令（智能操作系统 v1）
+│   └── env.sh                          # 统一路径/阈值配置（所有 Hook 共用）
+├── rules/
+│   ├── dangerous-commands.txt          # 危险命令正则规则集（26 条，动态加载）
+│   └── sensitive-patterns.txt          # 敏感信息检测规则集（24 种，动态加载）
 ├── hooks/
 │   ├── safety-guard.sh                 # Bash 命令安全防护 (exit 2 拦截)
 │   ├── sensitive-filter.sh             # 敏感信息过滤 (exit 2 拦截)
 │   ├── pre-compact-save.sh             # 压缩前状态保存
 │   ├── post-compact-restore.sh         # 压缩后上下文恢复
-│   ├── post-edit-audit.sh              # 编辑审计 + 熔断检测
+│   ├── post-edit-audit.sh              # 编辑审计 + 熔断检测 + flock 并发保护
 │   ├── verify-before-stop.sh           # 完成前四项检查
 │   └── macos-notify.sh                 # macOS 桌面通知
 └── memory/
@@ -227,22 +239,26 @@ chmod +x install.sh
 
 ```bash
 # 1. 创建目录
-mkdir -p ~/.claude/hooks ~/.claude/logs
+mkdir -p ~/.claude/hooks ~/.claude/logs ~/.claude/rules ~/.claude/configs
 
 # 2. 部署配置
 cp configs/settings.json ~/.claude/settings.json
 cp configs/hooks.json ~/.claude/hooks/hooks.json
 cp configs/CLAUDE.md ~/.claude/CLAUDE.md
+cp configs/env.sh ~/.claude/configs/env.sh
 
 # 3. 部署 Hook 脚本
 cp hooks/*.sh ~/.claude/hooks/
 chmod +x ~/.claude/hooks/*.sh
 
-# 4. 部署记忆文件
+# 4. 部署规则文件（安全规则外部化）
+cp rules/*.txt ~/.claude/rules/
+
+# 5. 部署记忆文件
 mkdir -p ~/.claude/projects/-Users-$(whoami)/memory
 cp memory/*.md ~/.claude/projects/-Users-$(whoami)/memory/
 
-# 5. 验证
+# 6. 验证
 claude  # 启动 Claude Code，观察认知循环是否激活
 ```
 
@@ -372,7 +388,8 @@ Claude: "检测到压缩恢复，执行 7 步恢复检查列表..."
 ### SSOT 原则
 
 所有规则**只定义一次**（Single Source of Truth）：
-- 安全规则定义在 Hook 脚本中
+- 安全规则外部化到 `rules/` 目录（脚本动态加载，扩展无需改代码）
+- 路径和阈值统一在 `configs/env.sh`（一处修改全局生效）
 - 行为指令定义在 CLAUDE.md 中
 - 记忆文件通过指针引用（非复制）
 - 避免跨文件的规则重复和不一致

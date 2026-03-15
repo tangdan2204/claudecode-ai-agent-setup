@@ -41,11 +41,14 @@ This project injects a complete autonomous agent system into Claude Code through
 ├──────────────────────────────────────────────────────────────┤
 │                                                              │
 │  ┌─ Hard Security Layer (Hooks + settings.json) ─────────┐  │
-│  │  Layer 0: settings.json deny (16 absolute rules)       │  │
-│  │  Layer 1: safety-guard.sh  (meta-cmd + danger detect)  │  │
-│  │  Layer 2: sensitive-filter.sh (15 secret patterns)     │  │
+│  │  Layer 0: settings.json deny (24 absolute rules)       │  │
+│  │  Layer 1: safety-guard.sh  (meta-cmd + danger ops      │  │
+│  │           + bypass detection)                           │  │
+│  │  Layer 2: sensitive-filter.sh (24 secret patterns)     │  │
 │  │  [exit 2 hard block — AI CANNOT bypass]                │  │
 │  └────────────────────────────────────────────────────────┘  │
+│  Rules externalized: rules/dangerous-commands.txt            │
+│                      rules/sensitive-patterns.txt            │
 │                                                              │
 │  ┌─ Auxiliary Monitor Layer (Hooks) ─────────────────────┐  │
 │  │  Layer 3: pre-compact-save.sh    (state snapshot)      │  │
@@ -64,6 +67,12 @@ This project injects a complete autonomous agent system into Claude Code through
 │                                                              │
 │  ┌─ Memory Persistence Layer ────────────────────────────┐  │
 │  │  MEMORY.md + recurring-patterns.md + compact-state.md  │  │
+│  │  hook-stats.jsonl (interception statistics)             │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                                                              │
+│  ┌─ Configuration Hub ─────────────────────────────────────┐  │
+│  │  configs/env.sh (unified paths/thresholds,              │  │
+│  │                  single point of change)                │  │
 │  └────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -78,8 +87,8 @@ Every task goes through a complete cognitive loop: **Perceive** (intent recognit
 
 ### 2. Eight-Layer Defense-in-Depth
 
-- **Layers 0-2 (Hard Intercept)**: `settings.json` deny rules + `safety-guard.sh` (meta-command detection, L4 absolute prohibition, L3 high risk, credential leak) + `sensitive-filter.sh` (15 secret patterns including OpenAI/GitHub/AWS/GCP/Slack/npm/PyPI tokens). These use `exit 2` — **AI cannot bypass**.
-- **Layers 3-6 (Auxiliary)**: State preservation, context recovery, edit auditing with circuit breaker (5x warning / 8x critical), completion verification (4 checks).
+- **Layers 0-2 (Hard Intercept)**: `settings.json` deny rules (24 rules including sudo, eval, force push, curl|bash) + `safety-guard.sh` (five-layer detection: meta-commands → Base64/heredoc/xargs bypass → L4 absolute block → L3 high risk → credential leak; rules externalized to rules/dangerous-commands.txt) + `sensitive-filter.sh` (24 sensitive patterns: API Key/Token/password/private key/JWT/cloud credentials/DB connections; rules externalized to rules/sensitive-patterns.txt). These use `exit 2` — **AI cannot bypass**.
+- **Layers 3-6 (Auxiliary)**: State preservation, context recovery, edit auditing with circuit breaker + flock concurrent protection (5x warning / 8x hard block), completion verification (4 checks).
 - **Layer 7 (Soft Constraints)**: CLAUDE.md behavioral instructions with L1-L4 security classification.
 
 ### 3. Three Departments Governance (三省六部)
@@ -192,22 +201,27 @@ chmod +x install.sh && ./install.sh
 
 ```bash
 # 1. Create directories
-mkdir -p ~/.claude/hooks ~/.claude/logs
+mkdir -p ~/.claude/hooks ~/.claude/logs ~/.claude/rules
 
 # 2. Deploy configs
 cp configs/settings.json ~/.claude/settings.json
 cp configs/hooks.json ~/.claude/hooks/hooks.json
 cp configs/CLAUDE.md ~/.claude/CLAUDE.md
+cp configs/env.sh ~/.claude/hooks/env.sh
 
-# 3. Deploy hook scripts
+# 3. Deploy rules
+cp rules/dangerous-commands.txt ~/.claude/rules/
+cp rules/sensitive-patterns.txt ~/.claude/rules/
+
+# 4. Deploy hook scripts
 cp hooks/*.sh ~/.claude/hooks/
 chmod +x ~/.claude/hooks/*.sh
 
-# 4. Deploy memory files
+# 5. Deploy memory files
 mkdir -p ~/.claude/projects/-Users-$(whoami)/memory
 cp memory/*.md ~/.claude/projects/-Users-$(whoami)/memory/
 
-# 5. Verify
+# 6. Verify
 claude  # Start Claude Code and test
 ```
 
@@ -218,23 +232,28 @@ claude  # Start Claude Code and test
 ```
 ClaudeCode-AI-Agent-Setup/
 ├── configs/
-│   ├── settings.json         # Permission config + 16 deny rules
+│   ├── settings.json         # Permission config + 24 deny rules
 │   ├── hooks.json            # Hook routing table (7 lifecycle events)
+│   ├── env.sh                # Unified path/threshold config (shared by all hooks)
 │   └── CLAUDE.md             # Core behavioral instructions
 ├── hooks/
 │   ├── safety-guard.sh       # Bash command security (exit 2 block)
 │   ├── sensitive-filter.sh   # Sensitive info filter (exit 2 block)
 │   ├── pre-compact-save.sh   # Pre-compression state save
 │   ├── post-compact-restore.sh # Post-compression context recovery
-│   ├── post-edit-audit.sh    # Edit audit + circuit breaker
+│   ├── post-edit-audit.sh    # Edit audit + circuit breaker + flock concurrent protection
 │   ├── verify-before-stop.sh # Pre-completion 4-point check
 │   └── macos-notify.sh       # macOS desktop notifications
+├── rules/
+│   ├── dangerous-commands.txt # Dangerous command rules (26 rules, dynamically loaded)
+│   └── sensitive-patterns.txt # Sensitive info patterns (24 patterns, dynamically loaded)
 ├── memory/
 │   ├── MEMORY.md             # Core memory index template
 │   └── recurring-patterns.md # Pattern tracking table template
 ├── install.sh                # Auto-install script
 ├── PRD.md                    # Product Requirements Document
 ├── RESEARCH-REPORT.md        # 6-Dimension Scientific Research Report
+├── AUDIT-REPORT.md           # Security Audit Report
 ├── QUICK-START.md            # Quick Start Guide
 └── ONE-LINER.md              # One-liner setup prompt
 ```
@@ -245,7 +264,7 @@ ClaudeCode-AI-Agent-Setup/
 
 - **Pure Configuration**: No Claude Code source code modifications. Uses only official config mechanisms (`settings.json`, `hooks/`, `CLAUDE.md`, `memory/`).
 - **Defense in Depth**: Intentional redundancy between layers. Even if prompts are bypassed, hard hooks (exit 2) still block dangerous operations.
-- **SSOT Principle**: Every rule defined once. Memory files use pointer references, not copies.
+- **SSOT Principle**: Every rule defined once. Detection rules externalized to `rules/` directory (dynamically loaded by hooks). Unified configuration in `configs/env.sh` (single point of change for all paths and thresholds). Memory files use pointer references, not copies.
 - **Zero Invasion**: Fully compatible with Claude Code updates. Deploy in 5 minutes. Remove completely at any time.
 
 ---

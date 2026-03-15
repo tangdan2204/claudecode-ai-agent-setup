@@ -40,8 +40,12 @@
 │                Claude Code エージェントシステム                 │
 ├──────────────────────────────────────────────────────────────┤
 │  ┌─ ハードセキュリティ層 ────────────────────────────────┐   │
-│  │  Layer 0-2: settings.json deny + safety-guard.sh     │   │
-│  │             + sensitive-filter.sh [exit 2 ハードブロック]│  │
+│  │  Layer 0-2: settings.json deny(24ルール)              │   │
+│  │    + safety-guard.sh(バイパス検出付き)                 │   │
+│  │    + sensitive-filter.sh(24パターン) [exit 2 ハードブロック]│ │
+│  └──────────────────────────────────────────────────────┘   │
+│  ┌─ 設定ハブ層 ────────────────────────────────────────┐   │
+│  │  configs/env.sh — 全 Hook 共有変数・パス統一管理       │   │
 │  └──────────────────────────────────────────────────────┘   │
 │  ┌─ 補助監視層 ─────────────────────────────────────────┐   │
 │  │  Layer 3-6: 状態保存 + コンテキスト回復 + 編集監査    │   │
@@ -54,8 +58,13 @@
 │  │  ├─ デシジョンツリールーティング                       │  │
 │  │  └─ 4層自己学習モデル                                 │  │
 │  └──────────────────────────────────────────────────────┘   │
+│  ┌─ ルール外部化層 ────────────────────────────────────┐  │
+│  │  rules/dangerous-commands.txt                        │  │
+│  │  rules/sensitive-patterns.txt                        │  │
+│  └──────────────────────────────────────────────────────┘   │
 │  ┌─ メモリ永続化層 ─────────────────────────────────────┐  │
 │  │  MEMORY.md + recurring-patterns.md + compact-state.md │  │
+│  │  + hook-stats.jsonl                                   │  │
 │  └──────────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -70,8 +79,8 @@
 
 ### 2. 8層多層防御
 
-- **Layer 0-2（ハードブロック）**: `settings.json` deny ルール + `safety-guard.sh`（メタコマンド検出、L4絶対禁止、L3高リスク、認証情報漏洩）+ `sensitive-filter.sh`（15種の機密パターン）。`exit 2` を使用 — **AIはバイパスできません**。
-- **Layer 3-6（補助）**: 状態保存、コンテキスト回復、サーキットブレーカー付き編集監査（5回警告/8回クリティカル）、完了前4点チェック。
+- **Layer 0-2（ハードブロック）**: `settings.json` deny ルール（24種: sudo/eval/force push/curl|bash 等）+ `safety-guard.sh`（メタコマンド検出 + Base64/heredoc/xargs バイパス検出、L4絶対禁止、L3高リスク、認証情報漏洩、ルール外部化: `rules/dangerous-commands.txt`）+ `sensitive-filter.sh`（24種の機密パターン: 秘密鍵/JWT/クラウド/DB接続文字列 等、ルール外部化: `rules/sensitive-patterns.txt`）。`exit 2` を使用 — **AIはバイパスできません**。
+- **Layer 3-6（補助）**: 状態保存、コンテキスト回復、サーキットブレーカー付き編集監査（5回警告/8回ハードブロック + flock 並行保護）、完了前4点チェック。
 - **Layer 7（ソフト制約）**: CLAUDE.md 行動指示、L1-L4セキュリティ分類。
 
 ### 3. 三省六部ガバナンス
@@ -142,7 +151,53 @@ Claude:
 
 ---
 
+## ファイル構成
+
+```
+ClaudeCode-AI-Agent-Setup/
+├── README.md                           # 本ファイル（中文）
+├── README.en.md                        # English README
+├── README.ja.md                        # 日本語 README
+├── README.ko.md                        # 한국어 README
+├── AUDIT-REPORT.md                     # 三次元アーキテクチャ審査レポート
+├── PRD.md                              # プロダクト要件定義書
+├── RESEARCH-REPORT.md                  # 六次元科学研究レポート
+├── QUICK-START.md                      # クイックスタートガイド
+├── ONE-LINER.md                        # ワンライナー構築プロンプト
+├── install.sh                          # 自動インストールスクリプト
+├── LICENSE                             # MIT ライセンス
+├── configs/
+│   ├── settings.json                   # 権限設定 + 24 deny ルール
+│   ├── hooks.json                      # Hook ルーティングテーブル（7 ライフサイクルイベント）
+│   ├── CLAUDE.md                       # コア行動指示（インテリジェントOS v1）
+│   └── env.sh                          # 統一パス/閾値設定（全 Hook 共用）
+├── rules/
+│   ├── dangerous-commands.txt          # 危険コマンド正規表現ルール集（26 条、動的ロード）
+│   └── sensitive-patterns.txt          # 機密情報検出ルール集（24 種、動的ロード）
+├── hooks/
+│   ├── safety-guard.sh                 # Bash コマンド安全防護 (exit 2 ブロック)
+│   ├── sensitive-filter.sh             # 機密情報フィルタ (exit 2 ブロック)
+│   ├── pre-compact-save.sh             # コンパクト前状態保存
+│   ├── post-compact-restore.sh         # コンパクト後コンテキスト回復
+│   ├── post-edit-audit.sh              # 編集監査 + サーキットブレーカー + flock 並行保護
+│   ├── verify-before-stop.sh           # 完了前4点チェック
+│   └── macos-notify.sh                 # macOS デスクトップ通知
+└── memory/
+    ├── MEMORY.md                       # コアメモリインデックステンプレート
+    └── recurring-patterns.md           # 反復問題追跡テンプレート
+```
+
+---
+
 ## クイックスタート
+
+### 前提条件
+
+- macOS または Linux
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) インストール済み
+- `jq` コマンドラインツール（`brew install jq`）
+
+### 一括インストール
 
 ```bash
 git clone https://github.com/tangdan2204/claudecode-ai-agent-setup.git
@@ -150,9 +205,47 @@ cd claudecode-ai-agent-setup
 chmod +x install.sh && ./install.sh
 ```
 
-前提条件: macOS/Linux、Claude Code CLI、`jq`（`brew install jq`）
+### 手動インストール
+
+```bash
+# 1. ディレクトリ作成
+mkdir -p ~/.claude/hooks ~/.claude/logs ~/.claude/rules ~/.claude/configs
+
+# 2. 設定ファイルのデプロイ
+cp configs/settings.json ~/.claude/settings.json
+cp configs/hooks.json ~/.claude/hooks/hooks.json
+cp configs/CLAUDE.md ~/.claude/CLAUDE.md
+cp configs/env.sh ~/.claude/configs/env.sh
+
+# 3. Hook スクリプトのデプロイ
+cp hooks/*.sh ~/.claude/hooks/
+chmod +x ~/.claude/hooks/*.sh
+
+# 4. ルールファイルのデプロイ（セキュリティルール外部化）
+cp rules/*.txt ~/.claude/rules/
+
+# 5. メモリファイルのデプロイ
+mkdir -p ~/.claude/projects/-Users-$(whoami)/memory
+cp memory/*.md ~/.claude/projects/-Users-$(whoami)/memory/
+
+# 6. 検証
+claude  # Claude Code を起動し、認知サイクルが有効になっているか確認
+```
 
 詳細な手順は [QUICK-START.md](./QUICK-START.md) を参照してください。
+
+---
+
+## 設計原則
+
+### SSOT 原則
+
+すべてのルールは**一度だけ定義**（Single Source of Truth）：
+- セキュリティルールは `rules/` ディレクトリに外部化（スクリプトが動的ロード、拡張時にコード変更不要）
+- パスと閾値は `configs/env.sh` に統一管理（一箇所変更で全体反映）
+- 行動指示は CLAUDE.md で定義
+- メモリファイルはポインタ参照（コピーではない）
+- ファイル間のルール重複と不整合を回避
 
 ---
 

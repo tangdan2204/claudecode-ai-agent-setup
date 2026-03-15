@@ -39,13 +39,21 @@
 ┌──────────────────────────────────────────────────────────────┐
 │                Claude Code 에이전트 시스템                      │
 ├──────────────────────────────────────────────────────────────┤
-│  ┌─ 하드 보안 레이어 ───────────────────────────────────┐    │
-│  │  Layer 0-2: settings.json deny + safety-guard.sh     │    │
-│  │             + sensitive-filter.sh [exit 2 하드 차단]   │   │
+│  ┌─ 하드 보안 레이어 (Hooks + settings.json) ──────────┐    │
+│  │  Layer 0: settings.json deny (24개 절대 금지 규칙)    │    │
+│  │  Layer 1: safety-guard.sh (메타 커맨드 + 위험 작업    │    │
+│  │           + 우회 감지)                                │    │
+│  │  Layer 2: sensitive-filter.sh (24종 민감 정보 패턴)   │    │
+│  │  [exit 2 하드 차단 — AI가 우회할 수 없습니다]          │    │
+│  │  규칙 외부화: rules/dangerous-commands.txt            │    │
+│  │              rules/sensitive-patterns.txt             │    │
 │  └──────────────────────────────────────────────────────┘    │
-│  ┌─ 보조 모니터링 레이어 ───────────────────────────────┐   │
-│  │  Layer 3-6: 상태 저장 + 컨텍스트 복구 + 편집 감사     │   │
-│  │             + 서킷 브레이커 + 완료 전 검사             │   │
+│  ┌─ 보조 모니터링 레이어 (Hooks) ─────────────────────┐     │
+│  │  Layer 3: pre-compact-save.sh    (압축 전 상태 저장)│     │
+│  │  Layer 4: post-compact-restore.sh (컨텍스트 복구)   │     │
+│  │  Layer 5: post-edit-audit.sh (감사+서킷 브레이커    │     │
+│  │           +flock)                                   │     │
+│  │  Layer 6: verify-before-stop.sh  (완료 전 4점 검사) │     │
 │  └──────────────────────────────────────────────────────┘    │
 │  ┌─ 동작 지시 레이어 (CLAUDE.md) ───────────────────────┐   │
 │  │  Layer 7: 지능형 OS v1                                │   │
@@ -56,6 +64,10 @@
 │  └──────────────────────────────────────────────────────┘    │
 │  ┌─ 메모리 지속성 레이어 ───────────────────────────────┐   │
 │  │  MEMORY.md + recurring-patterns.md + compact-state.md │   │
+│  │  edit-audit.log + hook-stats.jsonl                    │   │
+│  └──────────────────────────────────────────────────────┘    │
+│  ┌─ 설정 허브 레이어 ───────────────────────────────────┐   │
+│  │  configs/env.sh (통합 경로/임계값, 한 곳 수정 전체 적용)│   │
 │  └──────────────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -70,8 +82,8 @@
 
 ### 2. 8층 심층 방어
 
-- **Layer 0-2 (하드 차단)**: `settings.json` deny 규칙 + `safety-guard.sh`(메타 커맨드 감지, L4 절대 금지, L3 고위험, 자격 증명 유출) + `sensitive-filter.sh`(15종 민감 정보 패턴). `exit 2` 사용 — **AI가 우회할 수 없습니다**.
-- **Layer 3-6 (보조)**: 상태 보존, 컨텍스트 복구, 서킷 브레이커 포함 편집 감사(5회 경고/8회 위험), 완료 전 4점 검사.
+- **Layer 0-2 (하드 차단)**: `settings.json` deny 규칙(24개: rm -rf, mkfs, dd, chmod 777, SSH 키, sudo, eval, force push, curl|bash 등) + `safety-guard.sh`(메타 커맨드 감지 + Base64/heredoc/xargs 우회 감지 + L4 절대 금지 + L3 고위험 + 자격 증명 유출; 규칙 외부화 `rules/dangerous-commands.txt`) + `sensitive-filter.sh`(24종 민감 정보 패턴: API Key/Token/비밀번호/개인 키/JWT/클라우드 자격 증명/DB 연결; 규칙 외부화 `rules/sensitive-patterns.txt`). `exit 2` 사용 — **AI가 우회할 수 없습니다**.
+- **Layer 3-6 (보조)**: 상태 보존, 컨텍스트 복구, flock 동시 보호 포함 편집 감사(5회 경고/8회 하드 차단), 완료 전 4점 검사.
 - **Layer 7 (소프트 제약)**: CLAUDE.md 동작 지시, L1-L4 보안 분류.
 
 ### 3. 삼성육부 거버넌스 (三省六部)
@@ -152,7 +164,85 @@ chmod +x install.sh && ./install.sh
 
 필수 조건: macOS/Linux, Claude Code CLI, `jq` (`brew install jq`)
 
+### 수동 설치
+
+```bash
+# 1. 디렉토리 생성
+mkdir -p ~/.claude/hooks ~/.claude/logs ~/.claude/rules ~/.claude/configs
+
+# 2. 설정 배포
+cp configs/settings.json ~/.claude/settings.json
+cp configs/hooks.json ~/.claude/hooks/hooks.json
+cp configs/CLAUDE.md ~/.claude/CLAUDE.md
+cp configs/env.sh ~/.claude/configs/env.sh
+
+# 3. Hook 스크립트 배포
+cp hooks/*.sh ~/.claude/hooks/
+chmod +x ~/.claude/hooks/*.sh
+
+# 4. 규칙 파일 배포 (보안 규칙 외부화)
+cp rules/*.txt ~/.claude/rules/
+
+# 5. 메모리 파일 배포
+mkdir -p ~/.claude/projects/-Users-$(whoami)/memory
+cp memory/*.md ~/.claude/projects/-Users-$(whoami)/memory/
+
+# 6. 검증
+claude  # Claude Code 시작, 인지 사이클 활성화 확인
+```
+
 자세한 단계는 [QUICK-START.md](./QUICK-START.md)를 참조하세요.
+
+---
+
+## 파일 구조
+
+```
+ClaudeCode-AI-Agent-Setup/
+├── README.md                           # 中文
+├── README.en.md                        # English
+├── README.ja.md                        # 日本語
+├── README.ko.md                        # 한국어
+├── AUDIT-REPORT.md                     # 3차원 아키텍처 감사 보고서
+├── PRD.md                              # 제품 요구사항 문서
+├── RESEARCH-REPORT.md                  # 6차원 과학 연구 보고서
+├── QUICK-START.md                      # 빠른 시작 가이드
+├── ONE-LINER.md                        # 원라이너 설정 프롬프트
+├── install.sh                          # 자동 설치 스크립트
+├── LICENSE                             # MIT 라이선스
+├── configs/
+│   ├── settings.json                   # 권한 설정 + 24개 deny 규칙
+│   ├── hooks.json                      # Hook 라우팅 테이블 (7개 라이프사이클)
+│   ├── CLAUDE.md                       # 핵심 행동 지시 (지능형 OS v1)
+│   └── env.sh                          # 통합 경로/임계값 설정 (모든 Hook 공용)
+├── rules/
+│   ├── dangerous-commands.txt          # 위험 명령 정규식 규칙 (26개, 동적 로딩)
+│   └── sensitive-patterns.txt          # 민감 정보 검출 규칙 (24종, 동적 로딩)
+├── hooks/
+│   ├── safety-guard.sh                 # Bash 명령 보안 방어 (exit 2 차단)
+│   ├── sensitive-filter.sh             # 민감 정보 필터 (exit 2 차단)
+│   ├── pre-compact-save.sh             # 압축 전 상태 저장
+│   ├── post-compact-restore.sh         # 압축 후 컨텍스트 복구
+│   ├── post-edit-audit.sh              # 편집 감사 + 서킷 브레이커 + flock
+│   ├── verify-before-stop.sh           # 완료 전 4점 검사
+│   └── macos-notify.sh                 # macOS 데스크톱 알림
+└── memory/
+    ├── MEMORY.md                       # 핵심 메모리 인덱스 템플릿
+    └── recurring-patterns.md           # 반복 패턴 추적 템플릿
+```
+
+---
+
+## 설계 철학
+
+### SSOT 원칙
+
+모든 규칙은 **한 번만 정의**됩니다 (Single Source of Truth):
+- 보안 규칙 외부화: `rules/` 디렉토리 (스크립트가 동적 로딩, 확장 시 코드 수정 불필요)
+- 경로 및 임계값 통합: `configs/env.sh` (한 곳 수정으로 전체 적용)
+- 행동 지시: CLAUDE.md에 정의
+- 메모리 파일: 포인터 참조 사용 (복사 아님)
+- 파일 간 규칙 중복 및 불일치 방지
 
 ---
 
